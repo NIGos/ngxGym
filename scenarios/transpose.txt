@@ -7,3 +7,5 @@ transpose on
 frames 600
 transpose off
 frames 300
+
+# expect: which is the wrong way round

@@ -24,6 +24,9 @@
 //   omit mvscale        stop setting MV.Scale.X/Y at all.
 //   omit flags          stop setting DLSS.Feature.Create.Flags at all.
 //   omit jitter         stop setting Jitter.Offset.X/Y at all.
+//   omit quality        stop setting PerfQualityValue on the evaluate, which is the
+//                       shape every real title on record has: the add-on then keeps
+//                       its own and says so.
 //   exposure on         supply a 1x1 ExposureTexture while NOT setting the
 //                       AutoExposure create flag. Mount & Blade II: Bannerlord and
 //                       Red Dead Redemption 2 both do this; the second one stood the
@@ -41,7 +44,7 @@ enum StepKind
 };
 
 enum Mode { MODE_WINDOWED, MODE_BORDERLESS, MODE_EXCLUSIVE };
-enum Omit { OMIT_NONE, OMIT_MVSCALE, OMIT_FLAGS, OMIT_JITTER };
+enum Omit { OMIT_NONE, OMIT_MVSCALE, OMIT_FLAGS, OMIT_JITTER, OMIT_QUALITY };
 
 struct Step
 {
@@ -112,6 +115,7 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
             if      (_stricmp(a1, "mvscale") == 0) ScenarioAdd(s, STEP_OMIT, OMIT_MVSCALE);
             else if (_stricmp(a1, "flags")   == 0) ScenarioAdd(s, STEP_OMIT, OMIT_FLAGS);
             else if (_stricmp(a1, "jitter")  == 0) ScenarioAdd(s, STEP_OMIT, OMIT_JITTER);
+            else if (_stricmp(a1, "quality") == 0) ScenarioAdd(s, STEP_OMIT, OMIT_QUALITY);
             else if (_stricmp(a1, "none")    == 0) ScenarioAdd(s, STEP_OMIT, OMIT_NONE);
             else { printf("scenario %s:%d: unknown omit '%s'\n", path, no, a1); ok = false; }
         }

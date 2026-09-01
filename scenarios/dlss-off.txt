@@ -1,7 +1,15 @@
-# Switching DLSS off in the game's own settings and back on. The bridge should hand
-# the session to its synthetic contract while off, and take it straight back after.
+# Switching DLSS off in the game's own settings and back on.
+#
+# What this actually reaches, and the header used to claim more: the source latch
+# is RELEASED, and the game's next evaluate takes the mirror straight back. The
+# synthetic contract cannot arm in this run folder at all -- the log says
+# "motion vectors: NOT PRESENT" and "not viable as things stand", because there
+# is no ReShade motion-vector shader here. Claiming the handover would be a
+# scenario describing a state it never enters.
 frames 600
 dlss off
 frames 900
 dlss on
 frames 600
+
+# expect: The source latch is released

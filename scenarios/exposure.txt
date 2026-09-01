@@ -12,3 +12,5 @@ exposure on
 frames 1900
 exposure off
 frames 1900
+
+# expect: ExposureTexture

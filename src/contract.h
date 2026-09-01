@@ -49,6 +49,13 @@ struct EvalContract
     // A host that sets it only at create is not a game, and makes the bridge's
     // absent-flags path look like the normal one.
     Key create_flags;
+    // And the quality, for the same reason. EVERY D3D11 log on this disk says
+    // "quality preset 2 (MaxQuality), the game set none, so 2 is used" -- including
+    // the run whose scenario steps preset 1 and then preset 2. So the preset verb
+    // changed what the host BUILT and never what the add-on copied, and the copy
+    // path written for two real titles that ask for 1 and are given 2 was
+    // unreachable.
+    Key perf_quality;
 };
 
 template <typename P> void ApplyCreate(P *p, const CreateContract &c)
@@ -85,6 +92,7 @@ template <typename P> void ApplyEval(P *p, const EvalContract &e)
     if (e.out_x.has)          p->Set("DLSS.Output.Subrect.Base.X",             e.out_x.u);
     if (e.out_y.has)          p->Set("DLSS.Output.Subrect.Base.Y",             e.out_y.u);
     if (e.create_flags.has)   p->Set("DLSS.Feature.Create.Flags",              e.create_flags.u);
+    if (e.perf_quality.has)   p->Set("PerfQualityValue",                       e.perf_quality.u);
 }
 
 // Halton, for the sub-pixel jitter DLSS requires. Without it the temporal

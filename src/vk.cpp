@@ -344,13 +344,26 @@ static bool RenderFrame(Host &h)
     const float mvsx = -static_cast<float>(h.rw), mvsy = -static_cast<float>(h.rh);
 
     vkWaitForFences(h.dev, 1, &h.fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(h.dev, 1, &h.fence);
 
     uint32_t idx = 0;
     const VkSemaphore acq = h.acquired[h.sem_i];
     h.sem_i = (h.sem_i + 1) % static_cast<uint32_t>(h.acquired.size());
     const VkResult ar = vkAcquireNextImageKHR(h.dev, h.swap, UINT64_MAX, acq, VK_NULL_HANDLE, &idx);
-    if (ar == VK_ERROR_OUT_OF_DATE_KHR || ar == VK_SUBOPTIMAL_KHR) return true;
+    // The fence is reset AFTER the acquire can bail. Resetting first and then
+    // returning without submitting left nothing to signal it, and the next frame
+    // waited UINT64_MAX on a fence that would never come -- a hang with no verdict
+    // and no timeout, reachable by minimising the window during a long scenario.
+    //
+    // SUBOPTIMAL proceeds: the image is valid and acq was signalled. There is
+    // deliberately no swapchain-rebuild path -- the swapchain here is decorative,
+    // DLSS evaluates into h.output and the blit exists so a human can watch.
+    if (ar != VK_SUCCESS && ar != VK_SUBOPTIMAL_KHR)
+    {
+        printf("FAIL: vkAcquireNextImageKHR -> %d (do not resize or minimise the window)\n",
+               static_cast<int>(ar));
+        return false;
+    }
+    vkResetFences(h.dev, 1, &h.fence);
 
     vkResetCommandBuffer(h.cmd, 0);
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -402,6 +415,7 @@ static bool RenderFrame(Host &h)
         SetU(&ec.reset, h.frame == 0 ? 1u : 0u);
         SetU(&ec.subrect_w, h.rw); SetU(&ec.subrect_h, h.rh);
         if (h.omit != OMIT_FLAGS) SetU(&ec.create_flags, HostFlags());
+        if (h.omit != OMIT_QUALITY) SetU(&ec.perf_quality, static_cast<unsigned int>(h.quality));
 
         h.p->Reset();
         ApplyEval(h.p, ec);
@@ -522,12 +536,26 @@ static bool Setup(Host &h)
     NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(h.inst, h.phys, &fdi, &nde, &de);
     printf("NGX wants %u device extension(s)\n", nde);
     std::vector<const char *> dev_ext = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-    for (uint32_t i = 0; i < nde; ++i) dev_ext.push_back(de[i].extensionName);
+    // By name, not only by count. An extension arriving from NGX with nothing
+    // enabling its feature is the shape of the defect above, and a count cannot
+    // show it.
+    for (uint32_t i = 0; i < nde; ++i)
+    { printf("  %s\n", de[i].extensionName); dev_ext.push_back(de[i].extensionName); }
 
     const float prio = 1.0f;
     VkDeviceQueueCreateInfo qci = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     qci.queueFamilyIndex = h.qfam; qci.queueCount = 1; qci.pQueuePriorities = &prio;
+    // bufferDeviceAddress, because NGX asks for VK_KHR_buffer_device_address and an
+    // extension enabled without its feature is fourteen validation errors before
+    // frame 1 -- all this host own, and the first thing a reader triaging that log
+    // meets. Only what was measured: adding descriptorIndexing or timelineSemaphore
+    // because NGX probably uses them is the supply-what-nothing-declared move, and
+    // feeding the queried feature chain straight back would enable everything this
+    // card supports and hide the next missing feature exactly as this one was hidden.
+    VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    f12.bufferDeviceAddress = VK_TRUE;
     VkPhysicalDeviceVulkan13Features f13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+    f13.pNext = &f12;
     f13.dynamicRendering = VK_TRUE; f13.synchronization2 = VK_TRUE;
     VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.pNext = &f13;
@@ -641,7 +669,12 @@ int main(int argc, char **argv)
     if (!Setup(h)) return 3;
     if (!Rebuild(h, "start")) return 3;
 
-    int rc = 0;
+    // How many frames the scenario asks for, so a run that ends early is a failure
+    // rather than a short green one. Closing the window at frame 5 of 7600 used to
+    // abandon the loop with rc still 0, print the counters, print ok and return 0.
+    int rc = 0, want_frames = 0;
+    for (int i = 0; i < sc.count; ++i)
+        if (sc.steps[i].kind == STEP_FRAMES) want_frames += sc.steps[i].a;
     for (int s = 0; s < sc.count && rc == 0; ++s)
     {
         const Step &st = sc.steps[s];
@@ -712,6 +745,8 @@ int main(int argc, char **argv)
     if (h.inst) vkDestroyInstance(h.inst, nullptr);
     DestroyWindow(h.hwnd);
 
+    if (h.frame < want_frames)
+    { printf("FAIL: ran %d of %d frames the scenario asked for\n", h.frame, want_frames); return 6; }
     if (rc != 0) { printf("FAIL: scenario stopped\n"); return rc; }
     if (h.evaluated > 0 && h.delivered == 0) { printf("FAIL: no evaluate succeeded\n"); return 4; }
     printf("ok\n");

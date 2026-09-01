@@ -37,13 +37,22 @@ foreach ($p in @($exe, $addon, $shade)) {
 $run = Join-Path $root "run\$Scenario"
 # Clear the CONTENTS rather than the folder. Removing the directory itself fails
 # whenever anything holds a handle on it -- a shell sitting in it, an explorer
-# window -- and a stale lock is not a reason to refuse to run a test.
+# window -- so the contents go individually and a leftover is a hard failure below.
 if (Test-Path $run) {
     Get-ChildItem -Path $run -Force -Recurse | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 }
 New-Item -ItemType Directory -Force $run | Out-Null
 $stale = Get-ChildItem -Path $run -Force -ErrorAction SilentlyContinue
-if ($stale) { Write-Warning "run folder not fully cleared: $($stale.Count) item(s) left behind" }
+if ($stale) {
+    # A hard failure, and exit 2 like the missing-prerequisite gate above, so a
+    # suite loop can tell "your machine is wrong" from "the add-on is wrong". This
+    # was a warning, under a comment saying a stale lock is not a reason to refuse
+    # to run a test -- which is exactly backwards for a harness whose failure mode
+    # is proving nothing. A locked dlss5-bridge.cfg silently runs the PREVIOUS
+    # run stage, mode and flags.
+    Write-Host "FAIL: run folder not cleared, $($stale.Count) item(s) locked. Close any tail or editor on $run." -ForegroundColor Red
+    exit 2
+}
 
 Copy-Item $exe   $run
 Copy-Item $addon $run
@@ -195,6 +204,35 @@ if ($deliv.Count -eq 0) {
 # delivered-frame count: that line is periodic in the add-on -- every 1800 frames --
 # so a scenario in 300-frame segments prints it once and a verdict keyed on it reads
 # "1" however well the run went. The first version of this check did exactly that.
+
+# Did the mirror keep going? Every gate above is satisfied by the bridge starting up
+# during the leading "frames" segment that every scenario opens with -- so an add-on
+# that delivered nothing from the first mode change onward passed all seven. The
+# add-on logs a cumulative mirrored counter every 600 frames; if it has not moved
+# between the first and last, nothing was mirrored after the opening segment.
+# Scenarios shorter than ~1200 frames produce fewer than two of these lines and stay
+# covered by the exit-code and crash gates only.
+$mir = [regex]::Matches($txt, 'd3d12 (\d+)/\d+ \(')
+if ($mir.Count -ge 2 -and
+    [int]$mir[$mir.Count-1].Groups[1].Value -le [int]$mir[0].Groups[1].Value) {
+    Write-Host "FAIL: the mirror stopped advancing ($($mir[0].Groups[1].Value) -> $($mir[$mir.Count-1].Groups[1].Value) over $($mir.Count) samples)." -ForegroundColor Red
+    exit 1
+}
+
+# What this particular scenario says its own log must contain. Opt-in: a scenario
+# with no "# expect:" line is unaffected, and a scenario that has one states the
+# thing it exists to prove instead of leaving it to a reader.
+if (Test-Path $scfile) {
+    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect:\s*(.+)$')) {
+        $e = $m.Matches[0].Groups[1].Value.Trim()
+        if ($txt -notmatch [regex]::Escape($e)) {
+            Write-Host "FAIL: the scenario expects '$e' in the log and it is not there." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  expect ok: $e" -ForegroundColor DarkGray
+    }
+}
+
 Write-Host ("PASS: {0} feature build(s), no stand-down" -f $ready.Count) -ForegroundColor Green
 foreach ($m in $ready) {
     Write-Host ("       {0}x{1} -> {2}x{3}" -f `

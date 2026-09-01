@@ -9,3 +9,5 @@ mode borderless
 frames 300
 mode windowed
 frames 300
+
+# expect: rebuilding

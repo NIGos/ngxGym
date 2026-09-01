@@ -408,6 +408,7 @@ static bool RenderFrame(Host &h)
         SetU(&ec.reset, h.frame == 0 ? 1u : 0u);
         SetU(&ec.subrect_w, h.rw); SetU(&ec.subrect_h, h.rh);
         if (h.omit != OMIT_FLAGS) SetU(&ec.create_flags, HostCreateFlags(h));
+        if (h.omit != OMIT_QUALITY) SetU(&ec.perf_quality, static_cast<unsigned int>(h.quality));
 
         h.p->Reset();
         ApplyEval(h.p, ec);
@@ -454,6 +455,46 @@ static bool RenderFrame(Host &h)
             printf("  EvaluateFeature frame %d -> 0x%08X\n", h.frame, r);
     }
 
+
+    // Read one motion-vector texel back, once, and print what NGX will make of it.
+    // The previous version of this scene carried a comment claiming the vectors were
+    // correct by construction; they were wrong by a factor of 128000 and nobody could
+    // have seen it, because nothing printed a number. A comment asserting correctness
+    // with no runnable check behind it is the same failure as a PASS with no
+    // assertion. Printed, not asserted -- same cadence as the ExposureTexture
+    // read-back below, and for the same reason.
+    if (h.frame == 2)
+    {
+        D3D11_TEXTURE2D_DESC sd = {};
+        h.mv.tex->GetDesc(&sd);
+        sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0;
+        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MiscFlags = 0;
+        ID3D11Texture2D *st = nullptr;
+        if (SUCCEEDED(h.dev->CreateTexture2D(&sd, nullptr, &st)) && st != nullptr)
+        {
+            h.ctx->CopyResource(st, h.mv.tex);
+            D3D11_MAPPED_SUBRESOURCE ms2 = {};
+            if (SUCCEEDED(h.ctx->Map(st, 0, D3D11_MAP_READ, 0, &ms2)))
+            {
+                // R16G16_FLOAT: two halves. Converted by hand rather than pulling in
+                // a library for four lines.
+                const unsigned short *px = static_cast<const unsigned short *>(ms2.pData);
+                auto half = [](unsigned short v) {
+                    const int s2 = (v >> 15) & 1, e = (v >> 10) & 0x1F, m = v & 0x3FF;
+                    float f = 0.0f;
+                    if (e == 0)      f = m / 1024.0f / 16384.0f;
+                    else if (e < 31) f = (1.0f + m / 1024.0f) * powf(2.0f, static_cast<float>(e - 15));
+                    return s2 ? -f : f;
+                };
+                const float tx = half(px[0]), ty = half(px[1]);
+                printf("  MV texel (%.8f, %.8f) x MV.Scale (%.1f, %.1f) = (%.3f, %.3f) px,"
+                       " scene velocity is (%.2f, %.2f)\n",
+                       tx, ty, mvsx, mvsy, tx * mvsx, ty * mvsy, kVelX, kVelY);
+                h.ctx->Unmap(st, 0);
+            }
+            st->Release();
+        }
+    }
     ID3D11Texture2D *bb = nullptr;
     if (SUCCEEDED(h.sc->GetBuffer(0, IID_PPV_ARGS(&bb))) && bb != nullptr)
     {
@@ -589,7 +630,12 @@ int main(int argc, char **argv)
 
     if (!Rebuild(h, "start")) return 3;
 
-    int rc = 0;
+    // How many frames the scenario asks for, so a run that ends early is a failure
+    // rather than a short green one. Closing the window at frame 5 of 7600 used to
+    // abandon the loop with rc still 0, print the counters, print ok and return 0.
+    int rc = 0, want_frames = 0;
+    for (int i = 0; i < sc.count; ++i)
+        if (sc.steps[i].kind == STEP_FRAMES) want_frames += sc.steps[i].a;
     for (int s = 0; s < sc.count && rc == 0; ++s)
     {
         const Step &st = sc.steps[s];
@@ -672,6 +718,8 @@ int main(int argc, char **argv)
     h.sc->Release(); h.fac->Release(); h.ctx->Release(); h.dev->Release();
     DestroyWindow(h.hwnd);
 
+    if (h.frame < want_frames)
+    { printf("FAIL: ran %d of %d frames the scenario asked for\n", h.frame, want_frames); return 6; }
     if (rc != 0) { printf("FAIL: scenario stopped\n"); return rc; }
     if (h.evaluated > 0 && h.delivered == 0) { printf("FAIL: no evaluate succeeded\n"); return 4; }
     printf("ok\n");

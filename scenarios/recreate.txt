@@ -8,3 +8,5 @@ preset 2
 frames 300
 recreate
 frames 300
+
+# expect: rebuilding
