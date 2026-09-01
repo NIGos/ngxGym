@@ -187,3 +187,9 @@ foreach ($m in $ready) {
     Write-Host ("       {0}x{1} -> {2}x{3}" -f `
         $m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value, $m.Groups[4].Value)
 }
+
+# Explicitly, and this is not decoration. Falling off the end leaves $LASTEXITCODE
+# holding whatever a previous command left, so a caller looping over scenarios reads
+# a stale value and every run looks like the last one's outcome. A test runner whose
+# success cannot be detected is not a runner.
+exit 0

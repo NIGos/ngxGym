@@ -153,3 +153,5 @@ if ($Validate) {
         Write-Host "validation: clean -- no VUID reported" -ForegroundColor Green
     }
 }
+
+exit 0
