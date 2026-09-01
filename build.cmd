@@ -45,11 +45,22 @@ if not exist "%VKSDK%\Include\vulkan\vulkan.h" (
   goto :done
 )
 
+rem SPIR-V, generated with glslc into a bare {0x..,..} initialiser list and included
+rem INSIDE an array initialiser in vk.cpp. No wrapping step and no runtime compiler:
+rem glslc is a program, not a library, and a host that shells out to it at startup
+rem would be one more thing that can fail during a test.
+if not exist "%~dp0src\generated" mkdir "%~dp0src\generated"
+"%VKSDK%\Bin\glslc.exe" -fshader-stage=vert "%~dp0src\scene.vert" -o "%~dp0src\generated\scene_vert.h" -mfmt=c
+if errorlevel 1 exit /b 1
+"%VKSDK%\Bin\glslc.exe" -fshader-stage=frag "%~dp0src\scene.frag" -o "%~dp0src\generated\scene_frag.h" -mfmt=c
+if errorlevel 1 exit /b 1
+
 cl /nologo /W4 /EHsc /O2 /MT /std:c++17 ^
    /I"%VKSDK%\Include" /I"%NGX%\include" ^
    /Fe:"%~dp0bin\ngxhost-vk.exe" /Fo:"%~dp0bin\vk_" ^
    "%~dp0src\vk.cpp" ^
-   /link "%VKSDK%\Lib\vulkan-1.lib" user32.lib
+   /link "%VKSDK%\Lib\vulkan-1.lib" user32.lib advapi32.lib shlwapi.lib ^
+         "%NGX%\lib\Windows_x86_64\x64\nvsdk_ngx_s.lib"
 if errorlevel 1 exit /b 1
 echo built: %~dp0bin\ngxhost-vk.exe
 
