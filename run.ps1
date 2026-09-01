@@ -61,20 +61,35 @@ Copy-Item $addon $run
 # dxgi.dll instead -- one line here, not a redesign.
 Copy-Item $shade (Join-Path $run 'd3d11.dll')
 if (-not $NoSnippet) {
+    # Resolved once and guarded. Split-Path throws on a path whose drive does not
+    # exist, so pointing -Snippet at a deliberately absent file -- which is how you
+    # test what the add-on does with no super-resolution snippet at all -- used to
+    # kill the runner instead of staging one file short.
+    # Both halves guarded: Split-Path is happy to hand back a parent for a drive
+    # that does not exist, and Join-Path then throws on it.
+    $snipDir = $null
+    try { $snipDir = Split-Path -Parent $Snippet -EA Stop } catch { $snipDir = $null }
+    if ($snipDir) {
+        $ok = $false
+        try { $ok = Test-Path -LiteralPath $snipDir -EA Stop } catch { $ok = $false }
+        if (-not $ok) { $snipDir = $null }
+    }
     if (Test-Path $Snippet) { Copy-Item $Snippet (Join-Path $run 'nvngx_dlss.dll') }
     else { Write-Warning "snippet not found, running without one: $Snippet" }
     # The neural-rendering model, which is a different file from the
     # super-resolution snippet and is what the DLSS 5 add-on loads. Phase 0 does not
     # need it, but the add-on says so on every run and a warning nobody can act on
     # trains people to ignore warnings.
-    $nr = Join-Path (Split-Path -Parent $Snippet) 'nvngx_dlssnr.dll'
-    if (Test-Path $nr) { Copy-Item $nr $run }
+    if ($snipDir) {
+        $nr = Join-Path $snipDir 'nvngx_dlssnr.dll'
+        if (Test-Path $nr) { Copy-Item $nr $run }
+    }
 }
 
 # The consumer under test. Absent, the bridge runs and delivers to nobody, which is
 # a valid phase-0 result and a useless phase-1 one.
-$dlss5 = Join-Path (Split-Path -Parent $Snippet) 'renodx-dlss5.addon64'
-if (Test-Path $dlss5) { Copy-Item $dlss5 $run }
+$dlss5 = if ($snipDir) { Join-Path $snipDir 'renodx-dlss5.addon64' } else { $null }
+if ($dlss5 -and (Test-Path $dlss5)) { Copy-Item $dlss5 $run }
 else { Write-Warning "no renodx-dlss5.addon64 beside the snippet: the bridge will mirror to nobody." }
 
 # ReShade needs to be told where add-ons and effects live, and not to show a
