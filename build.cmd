@@ -35,4 +35,23 @@ cl /nologo /W4 /EHsc /O2 /MT /std:c++17 ^
 if errorlevel 1 exit /b 1
 
 echo built: %~dp0bin\ngxhost.exe
+
+rem The Vulkan host. Optional: it needs the Vulkan SDK, and the D3D11 half is useful
+rem without it, so a missing SDK is a message rather than a failed build.
+set VKSDK=%VULKAN_SDK%
+if "%VKSDK%"=="" set VKSDK=C:\VulkanSDK\1.4.357.0
+if not exist "%VKSDK%\Include\vulkan\vulkan.h" (
+  echo build.cmd: no Vulkan SDK at "%VKSDK%" -- skipping ngxhost-vk.exe
+  goto :done
+)
+
+cl /nologo /W4 /EHsc /O2 /MT /std:c++17 ^
+   /I"%VKSDK%\Include" /I"%NGX%\include" ^
+   /Fe:"%~dp0bin\ngxhost-vk.exe" /Fo:"%~dp0bin\vk_" ^
+   "%~dp0src\vk.cpp" ^
+   /link "%VKSDK%\Lib\vulkan-1.lib" user32.lib
+if errorlevel 1 exit /b 1
+echo built: %~dp0bin\ngxhost-vk.exe
+
+:done
 endlocal
