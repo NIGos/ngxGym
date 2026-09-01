@@ -77,7 +77,12 @@ struct Host
 
     VkCommandPool    pool = VK_NULL_HANDLE;
     VkCommandBuffer  cmd  = VK_NULL_HANDLE;
-    VkSemaphore      acquired = VK_NULL_HANDLE, rendered = VK_NULL_HANDLE;
+    // One acquire semaphore per frame in flight and one render-finished semaphore
+    // PER SWAPCHAIN IMAGE. A single pair is the textbook mistake and validation
+    // named it: a semaphore signalled for image 1 may still be in use by a present
+    // of image 0 that has not been re-acquired.
+    std::vector<VkSemaphore> acquired, rendered;
+    uint32_t         sem_i = 0;
     VkFence          fence = VK_NULL_HANDLE;
 
     VkPipelineLayout play = VK_NULL_HANDLE;
@@ -339,7 +344,9 @@ static bool RenderFrame(Host &h)
     vkResetFences(h.dev, 1, &h.fence);
 
     uint32_t idx = 0;
-    const VkResult ar = vkAcquireNextImageKHR(h.dev, h.swap, UINT64_MAX, h.acquired, VK_NULL_HANDLE, &idx);
+    const VkSemaphore acq = h.acquired[h.sem_i];
+    h.sem_i = (h.sem_i + 1) % static_cast<uint32_t>(h.acquired.size());
+    const VkResult ar = vkAcquireNextImageKHR(h.dev, h.swap, UINT64_MAX, acq, VK_NULL_HANDLE, &idx);
     if (ar == VK_ERROR_OUT_OF_DATE_KHR || ar == VK_SUBOPTIMAL_KHR) return true;
 
     vkResetCommandBuffer(h.cmd, 0);
@@ -430,13 +437,13 @@ static bool RenderFrame(Host &h)
 
     const VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    si.waitSemaphoreCount = 1; si.pWaitSemaphores = &h.acquired; si.pWaitDstStageMask = &wait;
+    si.waitSemaphoreCount = 1; si.pWaitSemaphores = &acq; si.pWaitDstStageMask = &wait;
     si.commandBufferCount = 1; si.pCommandBuffers = &h.cmd;
-    si.signalSemaphoreCount = 1; si.pSignalSemaphores = &h.rendered;
+    si.signalSemaphoreCount = 1; si.pSignalSemaphores = &h.rendered[idx];
     vkQueueSubmit(h.queue, 1, &si, h.fence);
 
     VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    pi.waitSemaphoreCount = 1; pi.pWaitSemaphores = &h.rendered;
+    pi.waitSemaphoreCount = 1; pi.pWaitSemaphores = &h.rendered[idx];
     pi.swapchainCount = 1; pi.pSwapchains = &h.swap; pi.pImageIndices = &idx;
     vkQueuePresentKHR(h.queue, &pi);
     ++h.frame;
@@ -559,8 +566,12 @@ static bool Setup(Host &h)
     cbi.commandPool = h.pool; cbi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; cbi.commandBufferCount = 1;
     VKC(vkAllocateCommandBuffers(h.dev, &cbi, &h.cmd), "vkAllocateCommandBuffers");
     VkSemaphoreCreateInfo semi = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.acquired), "vkCreateSemaphore");
-    VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.rendered), "vkCreateSemaphore");
+    h.acquired.resize(nimg); h.rendered.resize(nimg);
+    for (uint32_t i = 0; i < nimg; ++i)
+    {
+        VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.acquired[i]), "vkCreateSemaphore(acquire)");
+        VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.rendered[i]), "vkCreateSemaphore(render)");
+    }
     VkFenceCreateInfo fci = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     VKC(vkCreateFence(h.dev, &fci, nullptr, &h.fence), "vkCreateFence");
@@ -688,8 +699,8 @@ int main(int argc, char **argv)
     DestroyImg(h.dev, &h.color); DestroyImg(h.dev, &h.mv);
     DestroyImg(h.dev, &h.depth); DestroyImg(h.dev, &h.output);
     if (h.fence) vkDestroyFence(h.dev, h.fence, nullptr);
-    if (h.rendered) vkDestroySemaphore(h.dev, h.rendered, nullptr);
-    if (h.acquired) vkDestroySemaphore(h.dev, h.acquired, nullptr);
+    for (VkSemaphore s2 : h.rendered) if (s2) vkDestroySemaphore(h.dev, s2, nullptr);
+    for (VkSemaphore s2 : h.acquired) if (s2) vkDestroySemaphore(h.dev, s2, nullptr);
     if (h.pool) vkDestroyCommandPool(h.dev, h.pool, nullptr);
     if (h.swap) vkDestroySwapchainKHR(h.dev, h.swap, nullptr);
     if (h.dev) vkDestroyDevice(h.dev, nullptr);

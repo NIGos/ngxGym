@@ -18,6 +18,12 @@ param(
     [int]    $Frames  = 300,
     [switch] $Register,
     [switch] $Unregister,
+    # Enable VK_LAYER_KHRONOS_validation for this run. It is the only oracle this
+    # half has: the add-on makes two premises about a game's images it cannot check
+    # from inside -- that they carry VK_IMAGE_USAGE_TRANSFER_SRC_BIT, and that they
+    # are in VK_IMAGE_LAYOUT_GENERAL at the evaluate -- and both are written into its
+    # source as ASSUMED, NOT MEASURED. Validation reports either by name, instantly.
+    [switch] $Validate,
     [string] $Snippet = 'D:\SteamLibrary\steamapps\common\Baldurs Gate 3\bin\nvngx_dlss.dll'
 )
 
@@ -101,6 +107,15 @@ flags=-1
 Write-Host "run folder: $run"
 Write-Host "registered in ReShadeApps.ini: $((Get-Apps) -contains $target)"
 
+if ($Validate) {
+    $env:VK_INSTANCE_LAYERS = 'VK_LAYER_KHRONOS_validation'
+    $env:VK_LOADER_LAYERS_ENABLE = 'VK_LAYER_KHRONOS_validation'
+    Write-Host "validation layer enabled for this run" -ForegroundColor Cyan
+} else {
+    Remove-Item Env:VK_INSTANCE_LAYERS -ErrorAction SilentlyContinue
+    Remove-Item Env:VK_LOADER_LAYERS_ENABLE -ErrorAction SilentlyContinue
+}
+
 $outf = Join-Path $run 'host.out'
 $errf = Join-Path $run 'host.err'
 $p = Start-Process -FilePath $target -ArgumentList $Frames -WorkingDirectory $run `
@@ -121,4 +136,20 @@ if (-not $m.Success) {
     exit 1
 }
 Write-Host "PASS: the layer attached and the add-on registered at API $($m.Groups[1].Value)" -ForegroundColor Green
-Get-Content $log -TotalCount 10
+
+if ($Validate) {
+    # Validation writes to stderr. Reported as counted, deduplicated VUIDs rather
+    # than a wall of text: the same barrier fires once per frame and a thousand
+    # copies of one message is not a thousand findings.
+    $v = @()
+    if (Test-Path $errf) { $v += Get-Content $errf }
+    if (Test-Path $outf) { $v += Get-Content $outf }
+    $vuids = $v | Select-String -Pattern 'VUID-[A-Za-z0-9-]+' -AllMatches |
+             ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending
+    if ($vuids) {
+        Write-Host "validation: $($vuids.Count) distinct VUID(s)" -ForegroundColor Yellow
+        foreach ($g in $vuids) { Write-Host ("  {0,6}x  {1}" -f $g.Count, $g.Name) }
+    } else {
+        Write-Host "validation: clean -- no VUID reported" -ForegroundColor Green
+    }
+}
