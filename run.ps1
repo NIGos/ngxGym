@@ -99,8 +99,32 @@ if (-not $m.Success) {
     exit 1
 }
 $api = [int]$m.Groups[1].Value
-Write-Host "PASS: add-on registered at ReShade add-on API $api" -ForegroundColor Green
+Write-Host "registered at ReShade add-on API $api" -ForegroundColor Green
 if ($api -lt 10) {
-    Write-Host "  but below the synth floor of 10, so the synthetic path is unreachable here." -ForegroundColor Yellow
+    Write-Host "  below the synth floor of 10, so the synthetic path is unreachable here." -ForegroundColor Yellow
 }
-Get-Content $log -TotalCount 12
+
+# The verdict proper. Registration only proves the stage is up; what matters is
+# whether the bridge built its own feature and delivered a frame. Structure, not
+# wording: a count and a shape, so rephrasing a log line does not fail a run.
+$ready = [regex]::Match($txt, 'feature ready: render (\d+)x(\d+) -> output (\d+)x(\d+)')
+$deliv = [regex]::Matches($txt, 'frame (\d+) delivered')
+$stood = [regex]::Match($txt, 'does nothing for the rest of this session|disabled\. Game rendering is untouched')
+
+if ($stood.Success) {
+    Write-Host "FAIL: the bridge stood down. The line above it in the log says why." -ForegroundColor Red
+    ($txt -split "`n" | Select-String -Pattern 'does nothing for the rest|disabled\.' -Context 2,0) | Select-Object -First 1
+    exit 1
+}
+if (-not $ready.Success) {
+    Write-Host "FAIL: the bridge never built a feature. It attached and did nothing." -ForegroundColor Red
+    exit 1
+}
+if ($deliv.Count -eq 0) {
+    Write-Host "FAIL: feature built ($($ready.Groups[1].Value)x$($ready.Groups[2].Value) -> $($ready.Groups[3].Value)x$($ready.Groups[4].Value)) but no frame delivered." -ForegroundColor Red
+    exit 1
+}
+$last = [int]$deliv[$deliv.Count - 1].Groups[1].Value
+Write-Host ("PASS: mirrored {0}x{1} -> {2}x{3}, last delivered frame {4}" -f `
+    $ready.Groups[1].Value, $ready.Groups[2].Value,
+    $ready.Groups[3].Value, $ready.Groups[4].Value, $last) -ForegroundColor Green
