@@ -12,4 +12,11 @@ frames 900
 dlss on
 frames 600
 
+# The substitute contract is off by default as of 1.4.0 -- it is a real DLSS
+# feature fed approximated inputs and it shows -- and the source-latch release
+# exists to hand the session to it, so without the opt-in there is nothing to
+# release to and the release does not happen. This scenario is about the
+# release, so it asks for the key.
+# cfg: synth=1
+
 # expect: The source latch is released

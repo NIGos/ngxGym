@@ -129,6 +129,21 @@ if (Test-Path $scfile) {
 } else {
     $hostArg = "$Frames"
 }
+# A scenario may state configuration of its own with "# cfg: key=value" lines.
+# Appended after the block written above, so they win: the add-on's parser takes
+# the last value for a key. It exists because gating a behaviour behind a key
+# would otherwise make the scenario that proves the behaviour untestable --
+# dlss-off needs synth=1 to reach the source-latch release, and that key is off
+# by default on purpose.
+if ($Scenario -and (Test-Path $scfile)) {
+    $extra = @(Select-String -Path $scfile -Pattern '^#\s*cfg:\s*(.+)$' |
+               ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() })
+    if ($extra.Count -gt 0) {
+        Add-Content -Path (Join-Path $run 'dlss5-bridge.cfg') -Value $extra -Encoding ASCII
+        Write-Host ("scenario config: " + ($extra -join ', '))
+    }
+}
+
 
 # Redirected to files, not inherited. A crash inside a loaded DLL can take the
 # process down before anything reaches a console, and "host exit: -1073740791" with

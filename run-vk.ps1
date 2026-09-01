@@ -126,6 +126,21 @@ if ($Scenario -and (Test-Path $scfile)) {
     $hostArg = "$Scenario.txt"
     Write-Host "scenario: $Scenario.txt"
 }
+# A scenario may state configuration of its own with "# cfg: key=value" lines.
+# Appended after the block written above, so they win: the add-on's parser takes
+# the last value for a key. It exists because gating a behaviour behind a key
+# would otherwise make the scenario that proves the behaviour untestable --
+# dlss-off needs synth=1 to reach the source-latch release, and that key is off
+# by default on purpose.
+if ($Scenario -and (Test-Path $scfile)) {
+    $extra = @(Select-String -Path $scfile -Pattern '^#\s*cfg:\s*(.+)$' |
+               ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() })
+    if ($extra.Count -gt 0) {
+        Add-Content -Path (Join-Path $run 'dlss5-bridge.cfg') -Value $extra -Encoding ASCII
+        Write-Host ("scenario config: " + ($extra -join ', '))
+    }
+}
+
 $p = Start-Process -FilePath $target -ArgumentList $hostArg -WorkingDirectory $run `
                    -PassThru -Wait -NoNewWindow -RedirectStandardOutput $outf -RedirectStandardError $errf
 if (Test-Path $outf) { Get-Content $outf }
