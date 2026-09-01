@@ -42,6 +42,13 @@ struct EvalContract
     Key subrect_w, subrect_h;
     Key in_color_x, in_color_y, in_depth_x, in_depth_y, in_mv_x, in_mv_y;
     Key out_x, out_y;
+    // Yes, in the EVALUATE block as well as the create. Every game measured against
+    // this bridge sets it on both -- Baldur's Gate 3 states 107 and Red Dead
+    // Redemption 2 states 43 on their evaluates -- and the bridge reads it from
+    // whichever block it is handed, falling back to a 107 sentinel when it is absent.
+    // A host that sets it only at create is not a game, and makes the bridge's
+    // absent-flags path look like the normal one.
+    Key create_flags;
 };
 
 template <typename P> void ApplyCreate(P *p, const CreateContract &c)
@@ -77,6 +84,7 @@ template <typename P> void ApplyEval(P *p, const EvalContract &e)
     if (e.in_mv_y.has)        p->Set("DLSS.Input.MV.Subrect.Base.Y",           e.in_mv_y.u);
     if (e.out_x.has)          p->Set("DLSS.Output.Subrect.Base.X",             e.out_x.u);
     if (e.out_y.has)          p->Set("DLSS.Output.Subrect.Base.Y",             e.out_y.u);
+    if (e.create_flags.has)   p->Set("DLSS.Feature.Create.Flags",              e.create_flags.u);
 }
 
 // Halton, for the sub-pixel jitter DLSS requires. Without it the temporal

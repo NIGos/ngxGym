@@ -183,6 +183,15 @@ static bool MakeTex(ID3D11Device *dev, Tex *t, UINT w, UINT h, DXGI_FORMAT fmt,
     return true;
 }
 
+// One place, so the create block and the evaluate block cannot drift apart -- which
+// is a disagreement real games do have and this host should only produce on purpose.
+static unsigned int HostCreateFlags(const Host &h)
+{
+    unsigned int fl = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
+    if (h.hdr) fl |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
+    return fl;
+}
+
 static void ReleaseFeat(Host &h)
 {
     if (h.feat != nullptr) { NVSDK_NGX_D3D11_ReleaseFeature(h.feat); h.feat = nullptr; }
@@ -229,12 +238,7 @@ static bool Rebuild(Host &h, const char *why)
     SetU(&cc.width, h.rw); SetU(&cc.height, h.rh);
     SetU(&cc.out_width, h.out_w); SetU(&cc.out_height, h.out_h);
     SetU(&cc.perf_quality, static_cast<unsigned int>(h.quality));
-    if (h.omit != OMIT_FLAGS)
-    {
-        unsigned int fl = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
-        if (h.hdr) fl |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
-        SetU(&cc.create_flags, fl);
-    }
+    if (h.omit != OMIT_FLAGS) SetU(&cc.create_flags, HostCreateFlags(h));
     SetU(&cc.output_subrects, 0);
     SetU(&cc.node_mask_creation, 1); SetU(&cc.node_mask_visibility, 1);
 
@@ -385,6 +389,7 @@ static bool RenderFrame(Host &h)
         SetF(&ec.pre_exposure, 1.0f);
         SetU(&ec.reset, h.frame == 0 ? 1u : 0u);
         SetU(&ec.subrect_w, h.rw); SetU(&ec.subrect_h, h.rh);
+        if (h.omit != OMIT_FLAGS) SetU(&ec.create_flags, HostCreateFlags(h));
 
         h.p->Reset();
         ApplyEval(h.p, ec);

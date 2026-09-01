@@ -19,7 +19,9 @@ param(
     # Redemption 2's copy to stage 2.2.10.0, which does not -- that is the whole of
     # the "old snippet" scenario, a file copy rather than a feature.
     [string] $Snippet  = 'D:\SteamLibrary\steamapps\common\Baldurs Gate 3\bin\nvngx_dlss.dll',
-    [switch] $NoSnippet
+    [switch] $NoSnippet,
+    # Run with no ReShade effects enabled, so reshade_begin_effects never ticks.
+    [switch] $NoEffects
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,10 +68,28 @@ $dlss5 = Join-Path (Split-Path -Parent $Snippet) 'renodx-dlss5.addon64'
 if (Test-Path $dlss5) { Copy-Item $dlss5 $run }
 else { Write-Warning "no renodx-dlss5.addon64 beside the snippet: the bridge will mirror to nobody." }
 
-# ReShade needs to be told where add-ons live and not to show a tutorial to nobody.
+# ReShade needs to be told where add-ons and effects live, and not to show a
+# tutorial to nobody.
+#
+# The effect matters more than it looks. reshade_begin_effects only fires when
+# ReShade actually runs something, and the add-on's source-latch release needs
+# thirty of those ticks -- so a run folder with no effects enabled can never
+# release the latch, whatever the game does. -NoEffects reproduces that state
+# deliberately; the default reproduces a normal user's.
+if (-not $NoEffects) {
+    Copy-Item (Join-Path $root 'reshade-fx') (Join-Path $run 'fx') -Recurse
+    $effectLines = "EffectSearchPaths=.\fx`nTextureSearchPaths=.\fx"
+    $presetBody  = "[ngxhost_probe.fx]`n`nTechniques=ngxhost_probe@ngxhost_probe.fx`n"
+} else {
+    $effectLines = ""
+    $presetBody  = "Techniques=`n"
+}
+$presetBody | Set-Content -Path (Join-Path $run 'default.ini') -Encoding ASCII
+
 @"
 [GENERAL]
 PresetPath=.\default.ini
+$effectLines
 [ADDON]
 AddonPath=.
 [OVERLAY]
