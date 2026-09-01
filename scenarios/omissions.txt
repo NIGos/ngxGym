@@ -20,4 +20,5 @@ frames 1900
 omit quality
 frames 1900
 
-# expect: the neutral from nvsdk_ngx_helpers.h
+# expect-d3d11: the neutral from nvsdk_ngx_helpers.h
+# expect-vk: so the mirrored feature is created with zero

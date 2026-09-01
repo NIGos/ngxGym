@@ -19,4 +19,5 @@ frames 300
 resize 1920 1080
 frames 300
 
-# expect: rebuilding
+# expect-d3d11: rebuilding
+# expect-vk: building the D3D12 feature

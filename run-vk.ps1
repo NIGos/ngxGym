@@ -158,7 +158,62 @@ if (-not $m.Success) {
     Write-Host "FAIL: the add-on wrote a log but never registered with ReShade." -ForegroundColor Red
     exit 1
 }
-Write-Host "PASS: the layer attached and the add-on registered at API $($m.Groups[1].Value)" -ForegroundColor Green
+Write-Host "registered at ReShade add-on API $($m.Groups[1].Value)" -ForegroundColor Green
+
+# The verdict proper. "The layer attached" was the whole verdict until 2026-09-01,
+# and it passed a run in which the mirror died at the first resize and never came
+# back -- the defect this file exists to catch. Structure, not wording: counts and
+# a shape, so rephrasing a log line does not fail a run.
+$built = [regex]::Matches($txt, 'building the D3D12 feature and its Vulkan import for (\d+)x(\d+) -> (\d+)x(\d+)')
+$recorded = [regex]::Matches($txt, 'frame \d+ recorded')
+$stood = [regex]::Match($txt, 'does nothing for the rest of this session')
+if ($stood.Success) {
+    Write-Host "FAIL: the mirror stood down. The line it printed says why." -ForegroundColor Red
+    ($txt -split "`n" | Select-String -Pattern 'does nothing for the rest' -Context 2,0) | Select-Object -First 1
+    exit 1
+}
+if ($built.Count -eq 0) {
+    Write-Host "FAIL: the mirror never built a D3D12 feature. It attached and did nothing." -ForegroundColor Red
+    exit 1
+}
+if ($recorded.Count -eq 0) {
+    Write-Host "FAIL: a feature was built but no frame was ever recorded into the game's command buffer." -ForegroundColor Red
+    exit 1
+}
+
+# ReShade destroys and recreates its effect runtime on every swapchain change, so
+# a scenario with display steps tears the mirror down once per step. Each teardown
+# has to be followed by a build, or the mirror recovered in name only.
+$down = [regex]::Matches($txt, 'the game is destroying the effect runtime')
+$rearm = [regex]::Matches($txt, 'the mirror is armed again')
+if ($down.Count -gt 1 -and $rearm.Count -lt ($down.Count - 1)) {
+    Write-Host ("FAIL: {0} runtime teardown(s) but only {1} re-arm(s) -- the mirror did not come back." -f $down.Count, $rearm.Count) -ForegroundColor Red
+    exit 1
+}
+if ($rearm.Count -gt 0 -and $built.Count -lt ($rearm.Count + 1)) {
+    Write-Host ("FAIL: {0} re-arm(s) but only {1} build(s) -- it re-armed and never rebuilt." -f $rearm.Count, $built.Count) -ForegroundColor Red
+    exit 1
+}
+
+# What this particular scenario says its own log must contain. Opt-in, as on the
+# D3D11 side: a scenario with no "# expect:" line is unaffected.
+if ($Scenario -and (Test-Path $scfile)) {
+    foreach ($e in (Select-String -Path $scfile -Pattern '^#\s*expect(-vk)?:\s*(.+)$')) {
+        $want = $e.Matches[0].Groups[2].Value.Trim()
+        if ($txt -notmatch [regex]::Escape($want)) {
+            Write-Host "FAIL: the scenario expects '$want' in the log and it is not there." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  expect ok: $want" -ForegroundColor DarkGray
+    }
+}
+
+Write-Host ("PASS: {0} feature build(s), {1} re-arm(s) after {2} runtime teardown(s), no stand-down" -f `
+            $built.Count, $rearm.Count, $down.Count) -ForegroundColor Green
+foreach ($b in $built) {
+    Write-Host ("       {0}x{1} -> {2}x{3}" -f `
+        $b.Groups[1].Value, $b.Groups[2].Value, $b.Groups[3].Value, $b.Groups[4].Value)
+}
 
 if ($Validate) {
     # Validation writes to stderr. Reported as counted, deduplicated VUIDs rather

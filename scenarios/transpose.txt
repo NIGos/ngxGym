@@ -8,4 +8,5 @@ frames 600
 transpose off
 frames 300
 
-# expect: which is the wrong way round
+# expect-d3d11: which is the wrong way round
+# expect-vk: in preference to the four scalars its evaluates carry

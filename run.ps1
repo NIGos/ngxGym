@@ -223,8 +223,11 @@ if ($mir.Count -ge 2 -and
 # with no "# expect:" line is unaffected, and a scenario that has one states the
 # thing it exists to prove instead of leaving it to a reader.
 if (Test-Path $scfile) {
-    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect:\s*(.+)$')) {
-        $e = $m.Matches[0].Groups[1].Value.Trim()
+    # Both spellings: a shared expectation and this backend's own. The two logs
+    # word the same event differently, so a single list would either be so vague
+    # it proves nothing or fail on the other half.
+    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect(-d3d11)?:\s*(.+)$')) {
+        $e = $m.Matches[0].Groups[2].Value.Trim()
         if ($txt -notmatch [regex]::Escape($e)) {
             Write-Host "FAIL: the scenario expects '$e' in the log and it is not there." -ForegroundColor Red
             exit 1

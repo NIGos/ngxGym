@@ -13,4 +13,5 @@ frames 1900
 exposure off
 frames 1900
 
-# expect: ExposureTexture
+# expect-d3d11: ExposureTexture
+# expect-vk: it is mirrored to D3D12 so both sides run the same contract
