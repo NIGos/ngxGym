@@ -17,6 +17,11 @@ frames 600
 # exists to hand the session to it, so without the opt-in there is nothing to
 # release to and the release does not happen. This scenario is about the
 # release, so it asks for the key.
+# The source latch is released after five seconds of quiet AND thirty
+# presents, so this scenario is driven by the wall clock and not by its step
+# count. Fewer frames is fewer seconds, and the release stops happening.
+# nofast
+
 # cfg: synth=1
 
 # expect: The source latch is released

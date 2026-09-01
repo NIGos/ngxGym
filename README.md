@@ -26,6 +26,7 @@ seconds and says pass or fail.
 ```
     .uild.cmd                          both hosts
     .\suite.ps1                          every scenario on both backends
+    .\suite.ps1 -Fast                    the same coverage on a fraction of the frames
     .\suite.ps1 -Only vk -Repeat 4       one backend, four times each
     .\suite.ps1 -Validate                Vulkan runs also enable the Khronos layer
 
@@ -58,6 +59,11 @@ A scenario is a text file of verbs, one per line, in `scenarios\`:
     exposure on|off     supply an ExposureTexture
 ```
 
+A line starting `# nofast` opts the scenario out of `-Fast`. Use it when the
+behaviour under test is driven by the wall clock rather than by the step count:
+`dlss-off` waits five seconds and thirty presents for the source latch, and a
+fraction of the frames is a fraction of the seconds.
+
 A line starting `# cfg:` is appended to the generated `dlss5-bridge.cfg` for
 that run. It exists because a behaviour gated behind a key would otherwise be
 untestable: `dlss-off` needs `synth=1` to reach the source-latch release, and
@@ -81,6 +87,20 @@ is in the log. On Vulkan it also needs the mirror to have come back after every
 effect-runtime teardown -- ReShade destroys and recreates its runtime on any
 swapchain change, and a mirror that dies at the first resize used to pass.
 
+Every run also reports what the DLSS 5 add-on did with the contract, read from
+its own lines in `ReShade.log`. Creating its NR feature and evaluating it at
+least once is a gate: the bridge's own verdict proves it *built* a contract and
+delivered frames, and cannot prove anybody consumed them — "the bridge is fine
+and the picture is unchanged" is the report that costs the most time to triage.
+The workset pool running out afterwards is counted and **not** failed: it
+happens on every run of every scenario on both backends, and identically under a
+1.3.0 bridge built from its own tag, so it is the neighbour add-on's own state.
+
+`-Fast` divides every `frames N` by 8, with a floor that never makes a scenario
+longer than it was. It takes the full suite from about twelve minutes to about
+three. It covers the contracts and not the cadence, so a latch or timing
+regression is outside it — the summary line says so on every fast run.
+
 `-Validate` adds the Khronos validation layer on the Vulkan side. Its report
 separates VUIDs with a known owner from new ones. Four are known: two belong to
 ReShade's layer, attributed by running with
@@ -101,6 +121,10 @@ add-on's frame park, which cannot be expressed without them.
   not by the specification.
 - Motion vectors wrong by a factor of about 128000, in the host itself, after
   two commits had called them correct by construction.
+- A reported regression that was not one: the DLSS 5 add-on attaching, evaluating
+  once and then exhausting its own workset pool, so the picture is unchanged
+  while its panel says active. Reproduced here with no game and nothing toggled,
+  and identically under a bridge built from the 1.3.0 tag.
 
 The last one is the point: this measures the add-on, and it can be wrong too.
 Anything it reports is worth confirming against the log before acting on it.

@@ -12,6 +12,11 @@
 param(
     [ValidateSet('both','d3d11','vk')] [string] $Only = 'both',
     [int]    $Frames = 120,
+    # A contract-shaped pass: every scenario, every backend, a fraction of the
+    # frames. For a change that is not about frame cadence or a latch, which is
+    # most of them. dlss-off still runs in full -- it opts out with # nofast,
+    # because its latch release is measured in seconds rather than in steps.
+    [switch] $Fast,
     [int]    $Repeat = 1,
     [switch] $Validate
 )
@@ -32,6 +37,7 @@ foreach ($b in $backends) {
         $pass = 0; $fail = 0; $why = ''
         for ($i = 0; $i -lt $Repeat; ++$i) {
             $args = @{ Frames = $Frames; Scenario = $s }
+            if ($Fast) { $args['Scale'] = 8 }
             if ($Validate -and $b -eq 'vk') { $args['Validate'] = $true }
             $out = & $runner @args 2>&1
             if ($LASTEXITCODE -eq 0) { $pass++ }
@@ -58,5 +64,6 @@ if ($bad.Count -gt 0) {
                 (($rows | Measure-Object Pass -Sum).Sum + ($rows | Measure-Object Fail -Sum).Sum)) -ForegroundColor Red
     exit 1
 }
-Write-Host ('all {0} scenario run(s) passed.' -f ($rows | Measure-Object Pass -Sum).Sum) -ForegroundColor Green
+Write-Host ('all {0} scenario run(s) passed.{1}' -f ($rows | Measure-Object Pass -Sum).Sum,
+            $(if ($Fast) { ' FAST: a fraction of the frames, so a cadence or latch regression is not covered.' } else { '' })) -ForegroundColor Green
 exit 0

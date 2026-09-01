@@ -25,6 +25,8 @@ param(
     # are in VK_IMAGE_LAYOUT_GENERAL at the evaluate -- and both are written into its
     # source as ASSUMED, NOT MEASURED. Validation reports either by name, instantly.
     [switch] $Validate,
+    # Divide every 'frames N' in the scenario by this. See the block below.
+    [int]    $Scale = 1,
     [string] $Snippet = 'D:\SteamLibrary\steamapps\common\Baldurs Gate 3\bin\nvngx_dlss.dll'
 )
 
@@ -140,6 +142,42 @@ if ($Scenario -and (Test-Path $scfile)) {
         Write-Host ("scenario config: " + ($extra -join ', '))
     }
 }
+# Fast mode. Frames are what the suite spends its wall clock on: 20,950 of them
+# per backend, and omissions alone is 9,500. Nothing in a contract check needs
+# that many -- the counts are large so a real title has time to settle, and this
+# host settles in tens of frames.
+#
+# So -Scale divides every "frames N" in the COPIED scenario, never the original,
+# with a floor that keeps each step long enough to build a feature and deliver.
+# A scenario whose behaviour is driven by the WALL CLOCK rather than by steps
+# opts out with a "# nofast" line, because scaling it does not shorten the test,
+# it breaks it: dlss-off waits five seconds and thirty presents for the source
+# latch to be released, and a quarter of the frames is a quarter of the seconds.
+#
+# The scale is printed on every run that uses it. A fast run must never be
+# mistaken for a full one in a log somebody reads later.
+if ($Scale -gt 1 -and $Scenario -and (Test-Path $scfile)) {
+    $staged = Join-Path $run "$Scenario.txt"
+    if (Select-String -Path $scfile -Pattern '^#\s*nofast\b' -Quiet) {
+        Write-Host "scale: $Scenario opts out with # nofast, running it in full" -ForegroundColor DarkGray
+    } else {
+        $kept = 0
+        $cut  = 0
+        $out = Get-Content $staged | ForEach-Object {
+            if ($_ -match '^\s*frames\s+(\d+)\s*$') {
+                $was = [int]$Matches[1]
+                # Never longer than it was. exclusive's steps are 50 frames each,
+                # and a bare floor of 120 turned a 150-frame scenario into 360.
+                $now = [Math]::Min($was, [Math]::Max(120, [int][Math]::Floor($was / $Scale)))
+                $kept += $now; $cut += $was
+                "frames $now"
+            } else { $_ }
+        }
+        Set-Content -Path $staged -Value $out -Encoding ASCII
+        Write-Host ("scale /{0}: {1} frames instead of {2}" -f $Scale, $kept, $cut) -ForegroundColor DarkGray
+    }
+}
+
 
 $p = Start-Process -FilePath $target -ArgumentList $hostArg -WorkingDirectory $run `
                    -PassThru -Wait -NoNewWindow -RedirectStandardOutput $outf -RedirectStandardError $errf
@@ -273,6 +311,42 @@ if ($Validate) {
         foreach ($g in $vuids) { Write-Host ("  {0,6}x  {1}  ({2})" -f $g.Count, $g.Name, $known[$g.Name]) }
     } else {
         Write-Host "validation: clean -- no VUID reported" -ForegroundColor Green
+    }
+}
+
+# What the DLSS 5 add-on did with the contract. The bridge's own verdict proves
+# it BUILT one and delivered frames; it cannot prove anybody consumed them, and
+# "the bridge is fine and the picture is unchanged" is the report that costs the
+# most time to triage.
+#
+# renodx writes its own lines into ReShade.log, so they are read from there.
+# Attaching and evaluating at least once is the gate. The workset pool running
+# out afterwards is NOT: it happens on every run of every scenario on both
+# backends, and it happens identically under a 1.3.0 bridge built from its own
+# tag -- measured 2026-09-01 by staging that binary into a run folder. It is the
+# neighbour add-on's own state and this suite must not report it as a bridge
+# defect. It is counted and printed so a change in it is visible.
+$rs = Join-Path $run 'ReShade.log'
+if (Test-Path $rs) {
+    $rt = Get-Content $rs -Raw
+    if ($rt -match 'DLSS5 Generic') {
+        $made = ([regex]::Matches($rt, 'feature 18 created')).Count
+        $ran  = ([regex]::Matches($rt, 'inline feature 18 evaluation succeeded')).Count
+        $dry  = ([regex]::Matches($rt, 'NR workset pool exhausted')).Count
+        if ($made -eq 0) {
+            Write-Host "FAIL: the DLSS 5 add-on loaded and never created its NR feature. The bridge built a contract nobody consumed." -ForegroundColor Red
+            ($rt -split "`n" | Select-String -Pattern 'DLSS5 Generic' | Select-Object -Last 4)
+            exit 1
+        }
+        if ($ran -eq 0) {
+            Write-Host "FAIL: the DLSS 5 add-on created its NR feature and never evaluated it." -ForegroundColor Red
+            ($rt -split "`n" | Select-String -Pattern 'DLSS5 Generic' | Select-Object -Last 4)
+            exit 1
+        }
+        Write-Host ("NR: feature created {0}x, evaluated {1}x, workset pool exhausted {2}x" -f $made, $ran, $dry) -ForegroundColor Green
+        if ($dry -gt 0) {
+            Write-Host "    the exhaustion is the neighbour add-on's own and reproduces under a 1.3.0 bridge; it is counted, not failed." -ForegroundColor DarkGray
+        }
     }
 }
 
