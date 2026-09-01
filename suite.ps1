@@ -16,6 +16,8 @@ param(
     # frames. For a change that is not about frame cadence or a latch, which is
     # most of them. dlss-off still runs in full -- it opts out with # nofast,
     # because its latch release is measured in seconds rather than in steps.
+    # Pass -Background through to every run: no window takes focus.
+    [switch] $Background,
     [switch] $Fast,
     [int]    $Repeat = 1,
     [switch] $Validate
@@ -38,6 +40,7 @@ foreach ($b in $backends) {
         for ($i = 0; $i -lt $Repeat; ++$i) {
             $args = @{ Frames = $Frames; Scenario = $s }
             if ($Fast) { $args['Scale'] = 8 }
+            if ($Background) { $args['Background'] = $true }
             if ($Validate -and $b -eq 'vk') { $args['Validate'] = $true }
             $out = & $runner @args 2>&1
             if ($LASTEXITCODE -eq 0) { $pass++ }
@@ -58,6 +61,40 @@ foreach ($b in $backends) {
 
 Write-Host ''
 $rows | Format-Table Backend, Scenario, Pass, Fail -AutoSize
+# The consumer check, once, on D3D11. Two runs of one scenario that differ only
+# in whether the DLSS 5 add-on is staged: the bridge's own output hash must
+# differ too. It is the only check here that measures a NEIGHBOUR rather than
+# this project, and it is the one that would have caught the 2026-09-01 report
+# in a minute instead of an afternoon.
+if ($Only -ne 'vk') {
+    Write-Host ''
+    Write-Host 'consumer check: does the DLSS 5 add-on change the picture?'
+    $hashes = @{}
+    foreach ($with in @($true, $false)) {
+        $a = @{ Scenario = 'consumer'; Frames = $Frames }
+        if ($Background) { $a['Background'] = $true }
+        if (-not $with) { $a['NoConsumer'] = $true }
+        & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null
+        # Read from the LOG, not from the runner's output. Write-Host does not
+        # go down the pipeline, and capturing it is how this check silently
+        # compared two empty strings the first time it ran.
+        $cl = Join-Path $root 'run\consumer\dlss5-bridge.log'
+        $line = if (Test-Path $cl) { Select-String -Path $cl -Pattern 'output hash after evaluate' | Select-Object -First 1 } else { $null }
+        $hashes[$with] = if ($line) { [regex]::Match($line.ToString(), '([0-9A-F]{16})').Groups[1].Value } else { '' }
+        Write-Host ('  {0,-14} {1}' -f ($with ? 'with consumer' : 'without'), $hashes[$with])
+    }
+    if (-not $hashes[$true] -or -not $hashes[$false]) {
+        Write-Host '  FAIL: no output hash. The scenario must carry # cfg: hash_out=1.' -ForegroundColor Red
+        $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='no hash' }
+    } elseif ($hashes[$true] -eq $hashes[$false]) {
+        Write-Host '  FAIL: identical. The DLSS 5 add-on attached and wrote nothing -- the picture is the same as with no add-on at all.' -ForegroundColor Red
+        $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='consumer wrote nothing' }
+    } else {
+        Write-Host '  ok: the consumer changed the output.' -ForegroundColor Green
+        $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=1; Fail=0; Why='' }
+    }
+}
+
 $bad = @($rows | Where-Object { $_.Fail -gt 0 })
 if ($bad.Count -gt 0) {
     Write-Host ('{0} of {1} scenario runs failed.' -f ($bad | Measure-Object Fail -Sum).Sum,

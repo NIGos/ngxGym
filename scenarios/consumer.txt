@@ -1,0 +1,24 @@
+# Does the DLSS 5 add-on change the picture, or only say it does?
+#
+# Everything else in this suite measures THIS add-on: it built a contract, it
+# delivered frames, it did not stand down. None of that can tell a neighbour
+# which rewrote the output from one which attached, logged "active", and wrote
+# nothing. On 2026-09-01 that difference cost an afternoon, across two games,
+# before it turned out to be two builds of the neighbour under one version
+# number.
+#
+# So this scenario is run twice, with the consumer and without, and the bridge's
+# own output hash must differ. Measured that day at scale 8:
+#
+#   no consumer          D59F57A020169204
+#   renodx 1,703,424     C566EBC647461E4B     changed it
+#   renodx 1,732,608     D59F57A020169204     identical to no consumer at all
+#
+# The instrument was validated first: flags=108 against flags=-1 moves the hash,
+# so a hash that does not move means the output did not, rather than that nothing
+# was looked at.
+frames 300
+
+# cfg: hash_out=1
+
+# expect-d3d11: output hash after evaluate

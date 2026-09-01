@@ -27,6 +27,7 @@ seconds and says pass or fail.
     .uild.cmd                          both hosts
     .\suite.ps1                          every scenario on both backends
     .\suite.ps1 -Fast                    the same coverage on a fraction of the frames
+    .\suite.ps1 -Fast -Background        and without taking focus
     .\suite.ps1 -Only vk -Repeat 4       one backend, four times each
     .\suite.ps1 -Validate                Vulkan runs also enable the Khronos layer
 
@@ -101,6 +102,36 @@ longer than it was. It takes the full suite from about twelve minutes to about
 three. It covers the contracts and not the cadence, so a latch or timing
 regression is outside it — the summary line says so on every fast run.
 
+**The consumer check** is the one test here that measures a NEIGHBOUR rather than
+this project. Everything else proves the bridge built a contract and delivered
+frames; none of it can tell a DLSS 5 add-on that rewrote the output from one that
+attached, logged *active*, and wrote nothing. So `consumer` is run twice, with
+the add-on staged and without, and the bridge’s own output hash must differ.
+Measured 2026-09-01 at scale 8:
+
+| DLSS 5 add-on | output hash |
+| --- | --- |
+| none | `D59F57A020169204` |
+| renodx 1,703,424 bytes | `C566EBC647461E4B` |
+| renodx 1,732,608 bytes | `D59F57A020169204` — identical to no add-on at all |
+
+The instrument was validated before it was trusted: `flags=108` against
+`flags=-1` moves the hash, so a hash that does not move means the output did not,
+rather than that nothing was looked at. The readback is behind `hash_out=1` in
+the add-on’s own config and off everywhere else.
+
+`vault.ps1` keeps a copy of every file this suite stages that this project does
+not build — the DLSS 5 add-on, the NGX snippets — hashed and recorded in
+`vault.tsv`. It exists because two builds of one add-on, 29 KB apart and both
+declaring the same version, cost an afternoon: nothing on disk recorded that two
+existed. `-Use` deploys one for an A/B. The binaries are not tracked by git; the
+manifest is.
+
+`-Background` shows the window without activating it and sends it to the back, so
+a suite can run while somebody works. Not minimised — a minimised window has a
+0x0 client area and the Vulkan half correctly refuses to build a swapchain for
+one. Exclusive fullscreen is refused in that mode and says so.
+
 `-Validate` adds the Khronos validation layer on the Vulkan side. Its report
 separates VUIDs with a known owner from new ones. Four are known: two belong to
 ReShade's layer, attributed by running with
@@ -121,10 +152,10 @@ add-on's frame park, which cannot be expressed without them.
   not by the specification.
 - Motion vectors wrong by a factor of about 128000, in the host itself, after
   two commits had called them correct by construction.
-- A reported regression that was not one: the DLSS 5 add-on attaching, evaluating
-  once and then exhausting its own workset pool, so the picture is unchanged
-  while its panel says active. Reproduced here with no game and nothing toggled,
-  and identically under a bridge built from the 1.3.0 tag.
+- A reported regression that was not one: a DLSS 5 add-on that attaches, says it
+  is active and writes nothing. Reproduced here with no game and nothing toggled,
+  identically under a bridge built from the 1.3.0 tag, and then pinned to one of
+  two builds of that add-on which declare the same version and differ by 29 KB.
 
 The last one is the point: this measures the add-on, and it can be wrong too.
 Anything it reports is worth confirming against the log before acting on it.

@@ -22,6 +22,11 @@ param(
     [int]    $Scale = 1,
     [string] $Snippet  = 'D:\SteamLibrary\steamapps\common\Baldurs Gate 3\bin\nvngx_dlss.dll',
     [switch] $NoSnippet,
+    # Stage no DLSS 5 add-on. The other half of the consumer check: the bridge's
+    # own output hash with a consumer must differ from the one without.
+    # Do not take focus; see the block further down.
+    [switch] $Background,
+    [switch] $NoConsumer,
     # Run with no ReShade effects enabled, so reshade_begin_effects never ticks.
     [switch] $NoEffects
 )
@@ -94,7 +99,8 @@ if (-not $NoSnippet) {
 # and staging only the exact name silently drops the consumer, which makes the
 # NR check below pass by never running.
 $dlss5 = if ($snipDir) { Get-ChildItem $snipDir -Filter 'renodx-dlss5*.addon64' -EA SilentlyContinue | Select-Object -First 1 } else { $null }
-if ($dlss5) { Copy-Item $dlss5.FullName (Join-Path $run 'renodx-dlss5.addon64') }
+if ($dlss5 -and -not $NoConsumer) { Copy-Item $dlss5.FullName (Join-Path $run 'renodx-dlss5.addon64') }
+elseif ($NoConsumer) { Write-Host 'consumer: not staged (-NoConsumer)' -ForegroundColor DarkGray }
 else { Write-Warning "no renodx-dlss5.addon64 beside the snippet: the bridge will mirror to nobody." }
 
 # ReShade needs to be told where add-ons and effects live, and not to show a
@@ -206,6 +212,13 @@ if ($Scale -gt 1 -and $Scenario -and (Test-Path $scfile)) {
 # no output is not a bug report. host.out survives the process either way.
 $outf = Join-Path $run 'host.out'
 $errf = Join-Path $run 'host.err'
+# Run without taking the screen: the window is created unactivated and sent to
+# the back, so a suite can run while somebody works. Not minimised -- a
+# minimised window has a 0x0 client area and the Vulkan half refuses to build a
+# swapchain for one, correctly. Exclusive fullscreen is refused in this mode,
+# because it takes the display whatever anybody wants.
+if ($Background) { $env:NGXGYM_BACKGROUND = '1' } else { $env:NGXGYM_BACKGROUND = '0' }
+
 $p = Start-Process -FilePath (Join-Path $run 'ngxGym.exe') -ArgumentList $hostArg `
                    -WorkingDirectory $run -PassThru -Wait -NoNewWindow `
                    -RedirectStandardOutput $outf -RedirectStandardError $errf
@@ -351,6 +364,14 @@ if (Test-Path $rs) {
             Write-Host "    the exhaustion is the neighbour add-on's own and reproduces under a 1.3.0 bridge; it is counted, not failed." -ForegroundColor DarkGray
         }
     }
+}
+
+# The output hash, echoed so a caller can compare two runs. Printed only when the
+# scenario asked for it with hash_out=1; see the note beside that key.
+$oh = Get-Content $log | Select-String 'output hash after evaluate' | Select-Object -First 1
+if ($oh) {
+    $hex = [regex]::Match($oh.ToString(), '([0-9A-F]{16})').Groups[1].Value
+    Write-Host ("output hash: " + $hex) -ForegroundColor Cyan
 }
 
 exit 0

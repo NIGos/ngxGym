@@ -7,3 +7,5 @@ run/
 *.pdb
 *.ilk
 *.log
+
+vault/

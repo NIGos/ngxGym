@@ -24,6 +24,8 @@ param(
     # from inside -- that they carry VK_IMAGE_USAGE_TRANSFER_SRC_BIT, and that they
     # are in VK_IMAGE_LAYOUT_GENERAL at the evaluate -- and both are written into its
     # source as ASSUMED, NOT MEASURED. Validation reports either by name, instantly.
+    # Do not take focus; see the block further down.
+    [switch] $Background,
     [switch] $Validate,
     # Divide every 'frames N' in the scenario by this. See the block below.
     [int]    $Scale = 1,
@@ -181,6 +183,13 @@ if ($Scale -gt 1 -and $Scenario -and (Test-Path $scfile)) {
     }
 }
 
+
+# Run without taking the screen: the window is created unactivated and sent to
+# the back, so a suite can run while somebody works. Not minimised -- a
+# minimised window has a 0x0 client area and the Vulkan half refuses to build a
+# swapchain for one, correctly. Exclusive fullscreen is refused in this mode,
+# because it takes the display whatever anybody wants.
+if ($Background) { $env:NGXGYM_BACKGROUND = '1' } else { $env:NGXGYM_BACKGROUND = '0' }
 
 $p = Start-Process -FilePath $target -ArgumentList $hostArg -WorkingDirectory $run `
                    -PassThru -Wait -NoNewWindow -RedirectStandardOutput $outf -RedirectStandardError $errf

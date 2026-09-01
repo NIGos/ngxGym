@@ -678,9 +678,23 @@ static bool FollowWindow(Host &h, const char *why)
     return Rebuild(h, why);
 }
 
+// Defined below with the window helpers; ApplyMode has to know.
+static bool BackgroundMode();
+
 static bool ApplyMode(Host &h, Mode m)
 {
     if (m == h.mode) return true;
+
+    // Exclusive fullscreen takes the display whatever anybody wants, so it is
+    // the one mode a background run cannot honour. Refused rather than
+    // silently downgraded: a scenario that asked for it and got borderless
+    // would report on a state it never reached.
+    if (m == MODE_EXCLUSIVE && BackgroundMode())
+    {
+        printf("  mode exclusive: refused, this run is in the background\n");
+        return true;
+    }
+
 
     // Leaving exclusive first, always. Changing the window style while the
     // swapchain owns the display leaves the desktop mode changed if anything then
@@ -706,17 +720,19 @@ static bool ApplyMode(Host &h, Mode m)
         MONITORINFO mi = { sizeof(mi) };
         GetMonitorInfoW(mon, &mi);
         SetWindowLongPtrW(h.hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-        SetWindowPos(h.hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+        SetWindowPos(h.hwnd, BackgroundMode() ? HWND_BOTTOM : HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
                      mi.rcMonitor.right - mi.rcMonitor.left,
-                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW |
+                     (BackgroundMode() ? SWP_NOACTIVATE : 0u));
     }
     else if (h.windowed_style != 0)
     {
         SetWindowLongPtrW(h.hwnd, GWL_STYLE, h.windowed_style);
-        SetWindowPos(h.hwnd, HWND_TOP, h.windowed_rect.left, h.windowed_rect.top,
+        SetWindowPos(h.hwnd, BackgroundMode() ? HWND_BOTTOM : HWND_TOP, h.windowed_rect.left, h.windowed_rect.top,
                      h.windowed_rect.right - h.windowed_rect.left,
                      h.windowed_rect.bottom - h.windowed_rect.top,
-                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW |
+                     (BackgroundMode() ? SWP_NOACTIVATE : 0u));
     }
 
     h.mode = m;
@@ -902,6 +918,38 @@ static bool Setup(Host &h)
     return true;
 }
 
+
+// Run without taking the screen. NGXGYM_BACKGROUND=1 in the environment creates
+// the window without activating it and drops it to the bottom of the z-order, so
+// a suite can run while somebody works.
+//
+// NOT minimised: a minimised window has a zero-size client area, the swapchain
+// extent goes to 0x0 and the Vulkan half refuses to build one -- correctly, since
+// there is nothing to present to. Occluded is the state that keeps rendering.
+//
+// WS_EX_TOOLWINDOW keeps it out of alt-tab and the taskbar as well.
+static bool BackgroundMode()
+{
+    static int cached = -1;
+    if (cached < 0)
+    {
+        char v[8] = {};
+        cached = (GetEnvironmentVariableA("NGXGYM_BACKGROUND", v, sizeof(v)) != 0 &&
+                  v[0] == '1') ? 1 : 0;
+    }
+    return cached != 0;
+}
+
+static void ShowHostWindow(HWND w)
+{
+    if (!BackgroundMode()) { ShowWindow(w, SW_SHOW); return; }
+    ShowWindow(w, SW_SHOWNOACTIVATE);
+    SetWindowPos(w, HWND_BOTTOM, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    printf("background: the window is shown without focus and sent to the back. "
+           "Exclusive fullscreen is refused in this mode.\n");
+}
+
 int main(int argc, char **argv)
 {
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -923,11 +971,11 @@ int main(int argc, char **argv)
     RegisterClassExW(&wc);
     RECT r = { 0, 0, static_cast<LONG>(h.out_w), static_cast<LONG>(h.out_h) };
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    h.hwnd = CreateWindowExW(0, L"ngxGymvk", L"ngxGym-vk", WS_OVERLAPPEDWINDOW,
+    h.hwnd = CreateWindowExW(BackgroundMode() ? (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW) : 0, L"ngxGymvk", L"ngxGym-vk", WS_OVERLAPPEDWINDOW,
                              CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                              nullptr, nullptr, wc.hInstance, nullptr);
     if (h.hwnd == nullptr) { printf("FAIL: no window\n"); return 2; }
-    ShowWindow(h.hwnd, SW_SHOW);
+    ShowHostWindow(h.hwnd);
 
     if (!Setup(h)) return 3;
     if (!Rebuild(h, "start")) return 3;
