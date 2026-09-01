@@ -1,0 +1,11 @@
+# The sequence that produced four of the defects this repository exists to catch.
+# Every line here replaces a minute of playing a real game to a particular state.
+frames 300
+mode borderless
+frames 300
+mode exclusive
+frames 300
+mode borderless
+frames 300
+mode windowed
+frames 300

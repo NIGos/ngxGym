@@ -33,8 +33,15 @@ foreach ($p in @($exe, $addon, $shade)) {
 }
 
 $run = Join-Path $root "run\$Scenario"
-if (Test-Path $run) { Remove-Item -Recurse -Force $run }
+# Clear the CONTENTS rather than the folder. Removing the directory itself fails
+# whenever anything holds a handle on it -- a shell sitting in it, an explorer
+# window -- and a stale lock is not a reason to refuse to run a test.
+if (Test-Path $run) {
+    Get-ChildItem -Path $run -Force -Recurse | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+}
 New-Item -ItemType Directory -Force $run | Out-Null
+$stale = Get-ChildItem -Path $run -Force -ErrorAction SilentlyContinue
+if ($stale) { Write-Warning "run folder not fully cleared: $($stale.Count) item(s) left behind" }
 
 Copy-Item $exe   $run
 Copy-Item $addon $run
@@ -82,9 +89,35 @@ flags=-1
 $log = Join-Path $run 'dlss5-bridge.log'
 Write-Host "run folder: $run"
 
-$p = Start-Process -FilePath (Join-Path $run 'ngxhost.exe') -ArgumentList $Frames `
-                   -WorkingDirectory $run -PassThru -Wait -NoNewWindow
+# A scenario file if one exists by that name, otherwise a plain frame count. The
+# file is copied in so the run folder is self-contained and a scenario edited
+# mid-suite cannot change what a finished run did.
+$scfile = Join-Path $root "scenarios\$Scenario.txt"
+if (Test-Path $scfile) {
+    Copy-Item $scfile $run
+    $hostArg = "$Scenario.txt"
+    Write-Host "scenario: $Scenario.txt"
+} else {
+    $hostArg = "$Frames"
+}
+
+# Redirected to files, not inherited. A crash inside a loaded DLL can take the
+# process down before anything reaches a console, and "host exit: -1073740791" with
+# no output is not a bug report. host.out survives the process either way.
+$outf = Join-Path $run 'host.out'
+$errf = Join-Path $run 'host.err'
+$p = Start-Process -FilePath (Join-Path $run 'ngxhost.exe') -ArgumentList $hostArg `
+                   -WorkingDirectory $run -PassThru -Wait -NoNewWindow `
+                   -RedirectStandardOutput $outf -RedirectStandardError $errf
+if (Test-Path $outf) { Get-Content $outf }
 Write-Host "host exit: $($p.ExitCode)"
+if ($p.ExitCode -ne 0) {
+    $hex = '0x{0:X8}' -f ([int64]$p.ExitCode -band 0xFFFFFFFFL)
+    Write-Host "FAIL: the host exited $($p.ExitCode) ($hex)." -ForegroundColor Red
+    if ((Test-Path $errf) -and (Get-Item $errf).Length -gt 0) { Get-Content $errf }
+    Write-Host "  host.out and dlss5-bridge.log are in $run" -ForegroundColor Yellow
+    exit 1
+}
 
 # The verdict for phase 0, and only for phase 0: did the add-on attach at all.
 if (-not (Test-Path $log)) {
@@ -107,7 +140,7 @@ if ($api -lt 10) {
 # The verdict proper. Registration only proves the stage is up; what matters is
 # whether the bridge built its own feature and delivered a frame. Structure, not
 # wording: a count and a shape, so rephrasing a log line does not fail a run.
-$ready = [regex]::Match($txt, 'feature ready: render (\d+)x(\d+) -> output (\d+)x(\d+)')
+$ready = [regex]::Matches($txt, 'feature ready: render (\d+)x(\d+) -> output (\d+)x(\d+)')
 $deliv = [regex]::Matches($txt, 'frame (\d+) delivered')
 $stood = [regex]::Match($txt, 'does nothing for the rest of this session|disabled\. Game rendering is untouched')
 
@@ -116,15 +149,21 @@ if ($stood.Success) {
     ($txt -split "`n" | Select-String -Pattern 'does nothing for the rest|disabled\.' -Context 2,0) | Select-Object -First 1
     exit 1
 }
-if (-not $ready.Success) {
+if ($ready.Count -eq 0) {
     Write-Host "FAIL: the bridge never built a feature. It attached and did nothing." -ForegroundColor Red
     exit 1
 }
 if ($deliv.Count -eq 0) {
-    Write-Host "FAIL: feature built ($($ready.Groups[1].Value)x$($ready.Groups[2].Value) -> $($ready.Groups[3].Value)x$($ready.Groups[4].Value)) but no frame delivered." -ForegroundColor Red
+    Write-Host "FAIL: a feature was built but no frame was ever delivered." -ForegroundColor Red
     exit 1
 }
-$last = [int]$deliv[$deliv.Count - 1].Groups[1].Value
-Write-Host ("PASS: mirrored {0}x{1} -> {2}x{3}, last delivered frame {4}" -f `
-    $ready.Groups[1].Value, $ready.Groups[2].Value,
-    $ready.Groups[3].Value, $ready.Groups[4].Value, $last) -ForegroundColor Green
+
+# One "feature ready" per shape the host presented, and the shapes themselves. NOT a
+# delivered-frame count: that line is periodic in the add-on -- every 1800 frames --
+# so a scenario in 300-frame segments prints it once and a verdict keyed on it reads
+# "1" however well the run went. The first version of this check did exactly that.
+Write-Host ("PASS: {0} feature build(s), no stand-down" -f $ready.Count) -ForegroundColor Green
+foreach ($m in $ready) {
+    Write-Host ("       {0}x{1} -> {2}x{3}" -f `
+        $m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value, $m.Groups[4].Value)
+}

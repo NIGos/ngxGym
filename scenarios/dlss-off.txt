@@ -1,0 +1,7 @@
+# Switching DLSS off in the game's own settings and back on. The bridge should hand
+# the session to its synthetic contract while off, and take it straight back after.
+frames 600
+dlss off
+frames 900
+dlss on
+frames 600

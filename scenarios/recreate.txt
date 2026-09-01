@@ -1,0 +1,10 @@
+# The game replacing its own feature. Twice at a NEW shape, once at an unchanged
+# one -- the last is what Red Dead Redemption 2 does on an HDR or fullscreen toggle,
+# and the case the mirror carried its stale feature across until 1.4.0.
+frames 300
+preset 1
+frames 300
+preset 2
+frames 300
+recreate
+frames 300

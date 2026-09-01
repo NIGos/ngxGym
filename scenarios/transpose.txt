@@ -1,0 +1,9 @@
+# Deliberate misbehaviour: the four scalars transposed in the EVALUATE block while
+# the images stay honest. Baldur's Gate 3 emitted exactly this after a borderless to
+# fullscreen change on 2026-09-01, and did not stop. The bridge must repair it and
+# keep delivering, not stand down and not silently skip every frame.
+frames 300
+transpose on
+frames 600
+transpose off
+frames 300

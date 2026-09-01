@@ -1,0 +1,7 @@
+# The narrowest possible reproduction of the intermittent crash entering exclusive
+# fullscreen: roughly one run in three, at SetFullscreenState.
+frames 60
+mode exclusive
+frames 60
+mode windowed
+frames 30
