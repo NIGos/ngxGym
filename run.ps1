@@ -90,8 +90,11 @@ if (-not $NoSnippet) {
 
 # The consumer under test. Absent, the bridge runs and delivers to nobody, which is
 # a valid phase-0 result and a useless phase-1 one.
-$dlss5 = if ($snipDir) { Join-Path $snipDir 'renodx-dlss5.addon64' } else { $null }
-if ($dlss5 -and (Test-Path $dlss5)) { Copy-Item $dlss5 $run }
+# Any renodx-dlss5*.addon64: a re-download lands as 'renodx-dlss5 (2).addon64'
+# and staging only the exact name silently drops the consumer, which makes the
+# NR check below pass by never running.
+$dlss5 = if ($snipDir) { Get-ChildItem $snipDir -Filter 'renodx-dlss5*.addon64' -EA SilentlyContinue | Select-Object -First 1 } else { $null }
+if ($dlss5) { Copy-Item $dlss5.FullName (Join-Path $run 'renodx-dlss5.addon64') }
 else { Write-Warning "no renodx-dlss5.addon64 beside the snippet: the bridge will mirror to nobody." }
 
 # ReShade needs to be told where add-ons and effects live, and not to show a

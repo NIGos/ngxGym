@@ -79,8 +79,11 @@ if (Test-Path $Snippet) {
     Copy-Item $Snippet (Join-Path $run 'nvngx_dlss.dll')
     $nr = Join-Path (Split-Path -Parent $Snippet) 'nvngx_dlssnr.dll'
     if (Test-Path $nr) { Copy-Item $nr $run }
-    $d5 = Join-Path (Split-Path -Parent $Snippet) 'renodx-dlss5.addon64'
-    if (Test-Path $d5) { Copy-Item $d5 $run }
+    # Any renodx-dlss5*.addon64: a re-download lands as 'renodx-dlss5 (2).addon64'
+    # and staging only the exact name silently drops the consumer, which makes the
+    # NR check below pass by never running.
+    $d5 = Get-ChildItem (Split-Path -Parent $Snippet) -Filter 'renodx-dlss5*.addon64' -EA SilentlyContinue | Select-Object -First 1
+    if ($d5) { Copy-Item $d5.FullName (Join-Path $run 'renodx-dlss5.addon64') }
 }
 
 Copy-Item (Join-Path $root 'reshade-fx') (Join-Path $run 'fx') -Recurse
