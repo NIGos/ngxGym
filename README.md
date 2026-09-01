@@ -58,6 +58,11 @@ A scenario is a text file of verbs, one per line, in `scenarios\`:
     exposure on|off     supply an ExposureTexture
 ```
 
+A line starting `# cfg:` is appended to the generated `dlss5-bridge.cfg` for
+that run. It exists because a behaviour gated behind a key would otherwise be
+untestable: `dlss-off` needs `synth=1` to reach the source-latch release, and
+that key is off by default on purpose.
+
 A line starting `# expect:` names something the add-on's log must contain for
 the run to pass. `# expect-d3d11:` and `# expect-vk:` do the same for one
 backend, which is what the two logs word differently.
