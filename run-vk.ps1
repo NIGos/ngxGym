@@ -173,9 +173,34 @@ if ($Validate) {
     $vuids = $v | Select-String -Pattern 'Validation (Error|Warning): \[ (?<v>VUID-[A-Za-z0-9-]+)' |
              ForEach-Object { $_.Matches[0].Groups['v'].Value } |
              Group-Object | Sort-Object Count -Descending
-    if ($vuids) {
-        Write-Host "validation: $($vuids.Count) distinct VUID(s)" -ForegroundColor Yellow
-        foreach ($g in $vuids) { Write-Host ("  {0,6}x  {1}" -f $g.Count, $g.Name) }
+    # A VUID that is always there proves nothing, and a report that lists it beside
+    # a new one buries the new one. These four were measured on 2026-09-01 and each
+    # has an owner that is not a defect this suite can act on:
+    #
+    #   the two ReShade ones  -- present with the add-on's Vulkan work switched
+    #                            off entirely (vk_mirror=0) and absent when the
+    #                            ReShade layer is disabled with
+    #                            VK_LOADER_LAYERS_DISABLE=VK_LAYER_reshade, which
+    #                            is how they were attributed
+    #   the two event ones    -- the mirror's park: a command buffer waits on an
+    #                            event a worker thread host-sets after the submit.
+    #                            See the header of vkmirror.inc for why no
+    #                            arrangement of these calls avoids them
+    #
+    # Anything else is new and printed as such.
+    $known = @{
+        'VUID-vkGetPrivateData-objectHandle-09498'   = 'ReShade layer'
+        'VUID-vkQueueSubmit-pSignalSemaphores-00067' = 'ReShade layer'
+        'VUID-vkSetEvent-event-09543'                = "the mirror's park, inherent"
+        'VUID-vkCmdWaitEvents-srcStageMask-01158'    = "the mirror's park, inherent"
+    }
+    $fresh = @($vuids | Where-Object { -not $known.ContainsKey($_.Name) })
+    if ($fresh.Count -gt 0) {
+        Write-Host "validation: $($fresh.Count) VUID(s) NOT on the known list" -ForegroundColor Red
+        foreach ($g in $fresh) { Write-Host ("  {0,6}x  {1}" -f $g.Count, $g.Name) -ForegroundColor Red }
+    } elseif ($vuids) {
+        Write-Host "validation: nothing new; $($vuids.Count) known VUID(s)" -ForegroundColor Green
+        foreach ($g in $vuids) { Write-Host ("  {0,6}x  {1}  ({2})" -f $g.Count, $g.Name, $known[$g.Name]) }
     } else {
         Write-Host "validation: clean -- no VUID reported" -ForegroundColor Green
     }

@@ -1,0 +1,22 @@
+# The two display changes nothing exercised until now: an output-size change with
+# the window still windowed, and an HDR toggle.
+#
+# Both are a swapchain rebuild followed by a contract rebuild, which is the same
+# shape as a resolution change -- and HDR additionally moves the IsHDR create flag,
+# so the contract the add-on mirrors differs before and after. Red Dead Redemption 2
+# recreates its feature at an unchanged shape on an HDR toggle; this is that.
+#
+# hdr on is REFUSED when the display is not in HDR mode. The host says so and stays
+# in SDR rather than failing, so a pass here means the path ran, not that the
+# machine had an HDR display.
+frames 300
+resize 2560 1440
+frames 300
+hdr on
+frames 300
+hdr off
+frames 300
+resize 1920 1080
+frames 300
+
+# expect: rebuilding

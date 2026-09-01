@@ -99,6 +99,25 @@ struct Host
     NVSDK_NGX_Parameter *p    = nullptr;
     NVSDK_NGX_Handle    *feat = nullptr;
 
+    // The four states the D3D11 half has had since phase 2. Vulkan reaches each
+    // one through a different door: mode, resize and HDR are all a swapchain
+    // rebuild here, exclusive fullscreen is an extension rather than a call on
+    // the swapchain, and the exposure texture is an image plus a resource struct.
+    Mode      mode = MODE_WINDOWED;
+    LONG_PTR  windowed_style = 0;
+    RECT      windowed_rect = {};
+    bool      hdr = false;
+    bool      exposure_on = false;
+    Img       expo;
+
+    VkFormat        swap_fmt = VK_FORMAT_B8G8R8A8_UNORM;
+    VkColorSpaceKHR swap_cs  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    bool      hdr_ext  = false;   // VK_EXT_swapchain_colorspace on the instance
+    bool      fse_ext  = false;   // VK_EXT_full_screen_exclusive on the device
+    bool      fse_held = false;
+    PFN_vkAcquireFullScreenExclusiveModeEXT acquire_fse = nullptr;
+    PFN_vkReleaseFullScreenExclusiveModeEXT release_fse = nullptr;
+
     bool dlss_on   = true;
     bool transpose = false;
     Omit omit      = OMIT_NONE;
@@ -276,7 +295,16 @@ static void ReleaseFeat(Host &h)
     if (h.feat != nullptr) { NVSDK_NGX_VULKAN_ReleaseFeature(h.feat); h.feat = nullptr; }
 }
 
-static unsigned int HostFlags() { return NVSDK_NGX_DLSS_Feature_Flags_MVLowRes; }
+// IsHDR follows the swapchain's colour space, as it does on the D3D11 half and in
+// a game: the flag is a statement about what the colour image holds, so declaring
+// it while presenting to an SDR surface would be the invented value this host
+// exists to catch elsewhere.
+static unsigned int HostFlags(const Host &h)
+{
+    unsigned int fl = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
+    if (h.hdr) fl |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
+    return fl;
+}
 
 static bool Rebuild(Host &h, const char *why)
 {
@@ -300,6 +328,15 @@ static bool Rebuild(Host &h, const char *why)
                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_DEPTH_BIT)) return false;
     if (!MakeImg(h, &h.output, h.out_w, h.out_h, VK_FORMAT_R16G16B16A16_SFLOAT, cu, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
 
+    // 1x1 R32_SFLOAT, the shape every exposure texture in evidence has had. Made
+    // once and kept: unlike the four above, its shape does not depend on the render
+    // size, so a rebuild leaves it alone -- and MakeImg would destroy it first.
+    const bool expo_new = h.expo.img == VK_NULL_HANDLE;
+    if (expo_new && !MakeImg(h, &h.expo, 1, 1, VK_FORMAT_R32_SFLOAT,
+                             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT))
+    { printf("FAIL: exposure image\n"); return false; }
+
     // Into GENERAL once, and left there. See the note at the top of this file: it is
     // the layout the add-on assumes of a game's images, and using a different one
     // would test a premise the shipped code does not make.
@@ -309,6 +346,7 @@ static bool Rebuild(Host &h, const char *why)
     Barrier(cmd, h.mv.img,     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     Barrier(cmd, h.output.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     Barrier(cmd, h.depth.img,  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+    if (expo_new) Barrier(cmd, h.expo.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     if (!Flush(h, cmd)) return false;
 
     if (h.pipe != VK_NULL_HANDLE) { vkDestroyPipeline(h.dev, h.pipe, nullptr); h.pipe = VK_NULL_HANDLE; }
@@ -321,7 +359,7 @@ static bool Rebuild(Host &h, const char *why)
     SetU(&cc.width, h.rw); SetU(&cc.height, h.rh);
     SetU(&cc.out_width, h.out_w); SetU(&cc.out_height, h.out_h);
     SetU(&cc.perf_quality, static_cast<unsigned int>(h.quality));
-    if (h.omit != OMIT_FLAGS) SetU(&cc.create_flags, HostFlags());
+    if (h.omit != OMIT_FLAGS) SetU(&cc.create_flags, HostFlags(h));
     SetU(&cc.output_subrects, 0);
 
     h.p->Reset();
@@ -414,7 +452,7 @@ static bool RenderFrame(Host &h)
         SetF(&ec.pre_exposure, 1.0f);
         SetU(&ec.reset, h.frame == 0 ? 1u : 0u);
         SetU(&ec.subrect_w, h.rw); SetU(&ec.subrect_h, h.rh);
-        if (h.omit != OMIT_FLAGS) SetU(&ec.create_flags, HostFlags());
+        if (h.omit != OMIT_FLAGS) SetU(&ec.create_flags, HostFlags(h));
         if (h.omit != OMIT_QUALITY) SetU(&ec.perf_quality, static_cast<unsigned int>(h.quality));
 
         h.p->Reset();
@@ -433,6 +471,28 @@ static bool RenderFrame(Host &h)
         h.p->Set(NVSDK_NGX_Parameter_Output,        &ro);
         h.p->Set(NVSDK_NGX_Parameter_Depth,         &rd);
         h.p->Set(NVSDK_NGX_Parameter_MotionVectors, &rm);
+
+        // The create flags deliberately never carry AutoExposure, so switching this
+        // on is the Bannerlord and Red Dead Redemption 2 shape: DLSS is driven from
+        // an exposure texture and told nothing about it.
+        NVSDK_NGX_Resource_VK re = {};
+        if (h.exposure_on)
+        {
+            re = AsResource(h.expo, false);
+            h.p->Set(NVSDK_NGX_Parameter_ExposureTexture, &re);
+            // Read straight back, once. The D3D11 half spent a run believing it was
+            // setting this key while the add-on reported no such key; one line on
+            // the same object in the same frame settles which side is wrong.
+            static bool said = false;
+            if (!said)
+            {
+                said = true;
+                void *back = nullptr;
+                const NVSDK_NGX_Result g = h.p->Get(NVSDK_NGX_Parameter_ExposureTexture, &back);
+                printf("  ExposureTexture set=%p, read back 0x%08X -> %p\n",
+                       static_cast<void *>(&re), g, back);
+            }
+        }
 
         const NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_EvaluateFeature(h.cmd, h.feat, h.p, nullptr);
         ++h.evaluated;
@@ -475,6 +535,206 @@ static bool RenderFrame(Host &h)
     return true;
 }
 
+// The swapchain, and everything whose lifetime is tied to it. Called once from
+// Setup and again by every step that changes the window: on Vulkan a mode change,
+// a resize and an HDR toggle are all the same operation -- destroy the swapchain
+// and make another -- where on D3D11 they are three different calls.
+//
+// Semaphores live here because there is one render-finished semaphore per
+// swapchain image, so a swapchain with a different image count needs a different
+// number of them.
+static bool MakeSwapchain(Host &h, const char *why)
+{
+    vkDeviceWaitIdle(h.dev);
+
+    if (h.fse_held && h.release_fse != nullptr && h.swap != VK_NULL_HANDLE)
+    { h.release_fse(h.dev, h.swap); h.fse_held = false; }
+    for (VkSemaphore sm : h.acquired) if (sm != VK_NULL_HANDLE) vkDestroySemaphore(h.dev, sm, nullptr);
+    for (VkSemaphore sm : h.rendered) if (sm != VK_NULL_HANDLE) vkDestroySemaphore(h.dev, sm, nullptr);
+    h.acquired.clear(); h.rendered.clear(); h.sem_i = 0;
+    if (h.swap != VK_NULL_HANDLE) { vkDestroySwapchainKHR(h.dev, h.swap, nullptr); h.swap = VK_NULL_HANDLE; }
+
+    if (h.fse_ext && h.acquire_fse == nullptr)
+    {
+        h.acquire_fse = reinterpret_cast<PFN_vkAcquireFullScreenExclusiveModeEXT>(
+            vkGetDeviceProcAddr(h.dev, "vkAcquireFullScreenExclusiveModeEXT"));
+        h.release_fse = reinterpret_cast<PFN_vkReleaseFullScreenExclusiveModeEXT>(
+            vkGetDeviceProcAddr(h.dev, "vkReleaseFullScreenExclusiveModeEXT"));
+    }
+
+    VkSurfaceCapabilitiesKHR caps = {};
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(h.phys, h.surf, &caps);
+    h.swap_ext = caps.currentExtent;
+    if (h.swap_ext.width == 0xFFFFFFFFu) h.swap_ext = { h.out_w, h.out_h };
+    if (h.swap_ext.width == 0 || h.swap_ext.height == 0)
+    {
+        // A minimised window. Nothing to present to, and creating a zero-extent
+        // swapchain is invalid, so this is reported rather than papered over.
+        printf("  swapchain (%s): the surface is 0x0, nothing to present to\n", why);
+        return false;
+    }
+
+    // The surface format. HDR10 is a COLOUR SPACE, not a format on its own, so it
+    // is looked for as the pair -- and only among what the surface reports, which
+    // is the only list that means anything here.
+    h.swap_fmt = VK_FORMAT_B8G8R8A8_UNORM;
+    h.swap_cs  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    {
+        uint32_t nf = 0;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(h.phys, h.surf, &nf, nullptr);
+        std::vector<VkSurfaceFormatKHR> fmts(nf);
+        vkGetPhysicalDeviceSurfaceFormatsKHR(h.phys, h.surf, &nf, fmts.data());
+
+        bool found = false;
+        for (const VkSurfaceFormatKHR &f : fmts)
+        {
+            const bool want = h.hdr
+                ? (f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT &&
+                   f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32)
+                : (f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR &&
+                   (f.format == VK_FORMAT_B8G8R8A8_UNORM || f.format == VK_FORMAT_R8G8B8A8_UNORM));
+            if (want) { h.swap_fmt = f.format; h.swap_cs = f.colorSpace; found = true; break; }
+        }
+        if (h.hdr && !found)
+        {
+            // Not fatal, and said rather than asserted: HDR10 is refused when the
+            // display is not in HDR mode, and a run that reports why is worth more
+            // than one that dies. The state is corrected so nothing downstream
+            // believes it is in HDR.
+            printf("  hdr: the surface offers no HDR10_ST2084 format%s, staying in SDR\n",
+                   h.hdr_ext ? "" : " (VK_EXT_swapchain_colorspace is not present either)");
+            h.hdr = false;
+            for (const VkSurfaceFormatKHR &f : fmts)
+                if (f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR &&
+                    (f.format == VK_FORMAT_B8G8R8A8_UNORM || f.format == VK_FORMAT_R8G8B8A8_UNORM))
+                { h.swap_fmt = f.format; h.swap_cs = f.colorSpace; break; }
+        }
+    }
+
+    VkSwapchainCreateInfoKHR swci = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+    VkSurfaceFullScreenExclusiveInfoEXT fse = { VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT };
+    VkSurfaceFullScreenExclusiveWin32InfoEXT fse32 = { VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_WIN32_INFO_EXT };
+    if (h.mode == MODE_EXCLUSIVE && h.fse_ext)
+    {
+        // APPLICATION_CONTROLLED, not ALLOWED: the point of the step is to take the
+        // display, and letting the driver decide would make the test report a state
+        // it did not necessarily reach.
+        fse32.hmonitor = MonitorFromWindow(h.hwnd, MONITOR_DEFAULTTONEAREST);
+        fse.pNext = &fse32;
+        fse.fullScreenExclusive = VK_FULL_SCREEN_EXCLUSIVE_APPLICATION_CONTROLLED_EXT;
+        swci.pNext = &fse;
+    }
+    swci.surface = h.surf;
+    swci.minImageCount = caps.minImageCount < 2 ? 2 : caps.minImageCount;
+    swci.imageFormat = h.swap_fmt;
+    swci.imageColorSpace = h.swap_cs;
+    swci.imageExtent = h.swap_ext;
+    swci.imageArrayLayers = 1;
+    swci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    swci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swci.preTransform = caps.currentTransform;
+    swci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    swci.clipped = VK_TRUE;
+    VKC(vkCreateSwapchainKHR(h.dev, &swci, nullptr, &h.swap), "vkCreateSwapchainKHR");
+
+    uint32_t nimg = 0;
+    vkGetSwapchainImagesKHR(h.dev, h.swap, &nimg, nullptr);
+    h.swap_imgs.resize(nimg);
+    vkGetSwapchainImagesKHR(h.dev, h.swap, &nimg, h.swap_imgs.data());
+
+    VkSemaphoreCreateInfo semi = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    h.acquired.resize(nimg); h.rendered.resize(nimg);
+    for (uint32_t i = 0; i < nimg; ++i)
+    {
+        VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.acquired[i]), "vkCreateSemaphore(acquire)");
+        VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.rendered[i]), "vkCreateSemaphore(render)");
+    }
+
+    if (h.mode == MODE_EXCLUSIVE && h.acquire_fse != nullptr)
+    {
+        const VkResult ar = h.acquire_fse(h.dev, h.swap);
+        h.fse_held = ar == VK_SUCCESS;
+        if (!h.fse_held)
+            printf("  mode exclusive: vkAcquireFullScreenExclusiveModeEXT -> %d, "
+                   "the swapchain exists but does not own the display\n", ar);
+    }
+
+    printf("  swapchain (%s): %ux%u, %u images, format %d, colour space %d%s\n",
+           why, h.swap_ext.width, h.swap_ext.height, nimg,
+           static_cast<int>(h.swap_fmt), static_cast<int>(h.swap_cs),
+           h.fse_held ? ", exclusive" : "");
+    return true;
+}
+
+// The output size follows the window, as it does in a game: the swapchain is
+// remade at the new extent and the contract is rebuilt at that output size, so a
+// mode change and a resize both end in the same place a resolution change does.
+static bool FollowWindow(Host &h, const char *why)
+{
+    if (!MakeSwapchain(h, why)) return false;
+    h.out_w = h.swap_ext.width;
+    h.out_h = h.swap_ext.height;
+    return Rebuild(h, why);
+}
+
+static bool ApplyMode(Host &h, Mode m)
+{
+    if (m == h.mode) return true;
+
+    // Leaving exclusive first, always. Changing the window style while the
+    // swapchain owns the display leaves the desktop mode changed if anything then
+    // fails -- the same order the D3D11 half takes for the same reason.
+    if (h.mode == MODE_EXCLUSIVE && h.fse_held && h.release_fse != nullptr)
+    { h.release_fse(h.dev, h.swap); h.fse_held = false; }
+
+    if (m == MODE_EXCLUSIVE && !h.fse_ext)
+    {
+        // Not fatal and worth saying rather than asserting: VK_EXT_full_screen_exclusive
+        // is a Windows extension that a driver may not carry, and there is no other
+        // route to exclusive fullscreen on Vulkan.
+        printf("  mode exclusive: VK_EXT_full_screen_exclusive is not present, staying in %s\n",
+               h.mode == MODE_BORDERLESS ? "borderless" : "windowed");
+        return true;
+    }
+
+    if (m == MODE_BORDERLESS || m == MODE_EXCLUSIVE)
+    {
+        if (h.mode == MODE_WINDOWED)
+        { h.windowed_style = GetWindowLongPtrW(h.hwnd, GWL_STYLE); GetWindowRect(h.hwnd, &h.windowed_rect); }
+        HMONITOR mon = MonitorFromWindow(h.hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { sizeof(mi) };
+        GetMonitorInfoW(mon, &mi);
+        SetWindowLongPtrW(h.hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(h.hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                     mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+    else if (h.windowed_style != 0)
+    {
+        SetWindowLongPtrW(h.hwnd, GWL_STYLE, h.windowed_style);
+        SetWindowPos(h.hwnd, HWND_TOP, h.windowed_rect.left, h.windowed_rect.top,
+                     h.windowed_rect.right - h.windowed_rect.left,
+                     h.windowed_rect.bottom - h.windowed_rect.top,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+
+    h.mode = m;
+    return FollowWindow(h, "mode change");
+}
+
+static bool ApplyHdr(Host &h, bool on)
+{
+    if (on == h.hdr) return true;
+    h.hdr = on;
+    // A colour-space change is a swapchain rebuild, which is also a contract
+    // rebuild -- deliberately the same path a resolution change takes, because
+    // that is what a game does here too. MakeSwapchain corrects h.hdr back to
+    // false if the surface offers no HDR10 format, so a refusal is visible in the
+    // state and not only in the log.
+    return FollowWindow(h, on ? "hdr on" : "hdr off");
+}
+
 static bool Setup(Host &h)
 {
     // What NGX needs of the instance and the device, asked rather than assumed.
@@ -495,6 +755,28 @@ static bool Setup(Host &h)
     std::vector<const char *> inst_ext = { VK_KHR_SURFACE_EXTENSION_NAME,
                                            VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
     for (uint32_t i = 0; i < nie; ++i) inst_ext.push_back(ie[i].extensionName);
+
+    // Two more, both optional and both asked for by name before being enabled: an
+    // extension enabled without being present fails vkCreateInstance outright, and
+    // this host has to run where either is missing.
+    //
+    //   VK_EXT_swapchain_colorspace -- HDR10 is a colour space on the surface
+    //       format, so without it there is no HDR swapchain to ask for.
+    //   VK_KHR_get_surface_capabilities2 -- required by VK_EXT_full_screen_exclusive,
+    //       which is how exclusive fullscreen is reached on Vulkan.
+    {
+        uint32_t navail = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &navail, nullptr);
+        std::vector<VkExtensionProperties> avail(navail);
+        vkEnumerateInstanceExtensionProperties(nullptr, &navail, avail.data());
+        for (const VkExtensionProperties &e : avail)
+        {
+            if (strcmp(e.extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) == 0)
+            { inst_ext.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME); h.hdr_ext = true; }
+            else if (strcmp(e.extensionName, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) == 0)
+                inst_ext.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+        }
+    }
 
     VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
     app.pApplicationName = "ngxhost"; app.applicationVersion = 1;
@@ -542,6 +824,17 @@ static bool Setup(Host &h)
     for (uint32_t i = 0; i < nde; ++i)
     { printf("  %s\n", de[i].extensionName); dev_ext.push_back(de[i].extensionName); }
 
+    // Exclusive fullscreen, optional and by name for the same reason as above.
+    {
+        uint32_t navail = 0;
+        vkEnumerateDeviceExtensionProperties(h.phys, nullptr, &navail, nullptr);
+        std::vector<VkExtensionProperties> avail(navail);
+        vkEnumerateDeviceExtensionProperties(h.phys, nullptr, &navail, avail.data());
+        for (const VkExtensionProperties &e : avail)
+            if (strcmp(e.extensionName, VK_EXT_FULL_SCREEN_EXCLUSIVE_EXTENSION_NAME) == 0)
+            { dev_ext.push_back(VK_EXT_FULL_SCREEN_EXCLUSIVE_EXTENSION_NAME); h.fse_ext = true; }
+    }
+
     const float prio = 1.0f;
     VkDeviceQueueCreateInfo qci = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     qci.queueFamilyIndex = h.qfam; qci.queueCount = 1; qci.pQueuePriorities = &prio;
@@ -565,30 +858,7 @@ static bool Setup(Host &h)
     VKC(vkCreateDevice(h.phys, &dci, nullptr, &h.dev), "vkCreateDevice");
     vkGetDeviceQueue(h.dev, h.qfam, 0, &h.queue);
 
-    VkSurfaceCapabilitiesKHR caps = {};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(h.phys, h.surf, &caps);
-    h.swap_ext = caps.currentExtent;
-    if (h.swap_ext.width == 0xFFFFFFFFu) { h.swap_ext = { h.out_w, h.out_h }; }
-
-    VkSwapchainCreateInfoKHR swci = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
-    swci.surface = h.surf;
-    swci.minImageCount = caps.minImageCount < 2 ? 2 : caps.minImageCount;
-    swci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
-    swci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    swci.imageExtent = h.swap_ext;
-    swci.imageArrayLayers = 1;
-    swci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    swci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    swci.preTransform = caps.currentTransform;
-    swci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    swci.clipped = VK_TRUE;
-    VKC(vkCreateSwapchainKHR(h.dev, &swci, nullptr, &h.swap), "vkCreateSwapchainKHR");
-    uint32_t nimg = 0;
-    vkGetSwapchainImagesKHR(h.dev, h.swap, &nimg, nullptr);
-    h.swap_imgs.resize(nimg);
-    vkGetSwapchainImagesKHR(h.dev, h.swap, &nimg, h.swap_imgs.data());
-    printf("swapchain: %ux%u, %u images\n", h.swap_ext.width, h.swap_ext.height, nimg);
+    if (!MakeSwapchain(h, "start")) return false;
 
     VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -597,13 +867,6 @@ static bool Setup(Host &h)
     VkCommandBufferAllocateInfo cbi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     cbi.commandPool = h.pool; cbi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; cbi.commandBufferCount = 1;
     VKC(vkAllocateCommandBuffers(h.dev, &cbi, &h.cmd), "vkAllocateCommandBuffers");
-    VkSemaphoreCreateInfo semi = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    h.acquired.resize(nimg); h.rendered.resize(nimg);
-    for (uint32_t i = 0; i < nimg; ++i)
-    {
-        VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.acquired[i]), "vkCreateSemaphore(acquire)");
-        VKC(vkCreateSemaphore(h.dev, &semi, nullptr, &h.rendered[i]), "vkCreateSemaphore(render)");
-    }
     VkFenceCreateInfo fci = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     VKC(vkCreateFence(h.dev, &fci, nullptr, &h.fence), "vkCreateFence");
@@ -710,12 +973,26 @@ int main(int argc, char **argv)
         // parser accepts and the executor drops is a run that proves something other
         // than what its file says. The D3D11 host learned that the expensive way.
         case STEP_MODE:
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            if (!ApplyMode(h, static_cast<Mode>(st.a))) rc = 4;
+            break;
         case STEP_RESIZE:
+            printf("[%d/%d] resize %d %d\n", s + 1, sc.count, st.a, st.b);
+            {
+                RECT wr = { 0, 0, st.a, st.b };
+                AdjustWindowRect(&wr, static_cast<DWORD>(GetWindowLongPtrW(h.hwnd, GWL_STYLE)), FALSE);
+                SetWindowPos(h.hwnd, nullptr, 0, 0, wr.right - wr.left, wr.bottom - wr.top,
+                             SWP_NOMOVE | SWP_NOZORDER);
+                if (!FollowWindow(h, "resize")) rc = 4;
+            }
+            break;
         case STEP_HDR:
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            if (!ApplyHdr(h, st.a != 0)) rc = 4;
+            break;
         case STEP_EXPOSURE:
-            printf("[%d/%d] FAIL: '%s' is not implemented on the Vulkan host yet\n",
-                   s + 1, sc.count, StepName(st));
-            rc = 5;
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            h.exposure_on = st.a != 0;
             break;
         default:
             printf("[%d/%d] FAIL: step kind %d is parsed but not executed\n",
@@ -735,10 +1012,12 @@ int main(int argc, char **argv)
     if (h.play) vkDestroyPipelineLayout(h.dev, h.play, nullptr);
     DestroyImg(h.dev, &h.color); DestroyImg(h.dev, &h.mv);
     DestroyImg(h.dev, &h.depth); DestroyImg(h.dev, &h.output);
+    DestroyImg(h.dev, &h.expo);
     if (h.fence) vkDestroyFence(h.dev, h.fence, nullptr);
     for (VkSemaphore s2 : h.rendered) if (s2) vkDestroySemaphore(h.dev, s2, nullptr);
     for (VkSemaphore s2 : h.acquired) if (s2) vkDestroySemaphore(h.dev, s2, nullptr);
     if (h.pool) vkDestroyCommandPool(h.dev, h.pool, nullptr);
+    if (h.fse_held && h.release_fse != nullptr && h.swap) h.release_fse(h.dev, h.swap);
     if (h.swap) vkDestroySwapchainKHR(h.dev, h.swap, nullptr);
     if (h.dev) vkDestroyDevice(h.dev, nullptr);
     if (h.surf) vkDestroySurfaceKHR(h.inst, h.surf, nullptr);
