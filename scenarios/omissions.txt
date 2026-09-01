@@ -1,0 +1,17 @@
+# What a game leaves out. Each of these has a fallback in the bridge, and a fallback
+# nobody exercises is a fallback nobody knows works.
+#
+# omit flags is the one that matters most: with no DLSS.Feature.Create.Flags from the
+# game the bridge resolves 107, which carries IsHDR and AutoExposure. That is the
+# mechanism behind the Assassin's Creed Odyssey HDR overexposure report, and this is
+# where it can be watched happening.
+#
+# 1900-frame segments so the every-1800 dump lands inside each one -- see exposure.txt.
+omit flags
+frames 1900
+omit mvscale
+frames 1900
+omit jitter
+frames 1900
+omit none
+frames 1900

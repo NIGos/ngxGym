@@ -1,0 +1,14 @@
+# Mount & Blade II: Bannerlord and Red Dead Redemption 2 both drive DLSS from a 1x1
+# exposure texture WITHOUT setting the AutoExposure create flag. On Vulkan that stood
+# the mirror down for a whole session until 1.4.0 carried the texture across; on
+# D3D11 the bridge has mirrored it since 1.0.16, and this is what proves it still does.
+#
+# ORDER MATTERS, and the first version of this file got it wrong. The add-on dumps an
+# evaluate's parameter block for its first few frames and then every 1800, so a
+# scenario that changes behaviour after a short run produces a log full of evidence
+# about the state it was NOT testing. Put the change first, and give it more than
+# 1800 frames so a periodic dump lands inside it.
+exposure on
+frames 1900
+exposure off
+frames 1900

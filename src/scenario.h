@@ -24,6 +24,10 @@
 //   omit mvscale        stop setting MV.Scale.X/Y at all.
 //   omit flags          stop setting DLSS.Feature.Create.Flags at all.
 //   omit jitter         stop setting Jitter.Offset.X/Y at all.
+//   exposure on         supply a 1x1 ExposureTexture while NOT setting the
+//                       AutoExposure create flag. Mount & Blade II: Bannerlord and
+//                       Red Dead Redemption 2 both do this; the second one stood the
+//                       Vulkan mirror down for a whole session until 1.4.0.
 #pragma once
 
 #include <cstdio>
@@ -33,7 +37,7 @@
 enum StepKind
 {
     STEP_FRAMES, STEP_MODE, STEP_RESIZE, STEP_PRESET, STEP_RECREATE,
-    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT
+    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT, STEP_EXPOSURE
 };
 
 enum Mode { MODE_WINDOWED, MODE_BORDERLESS, MODE_EXCLUSIVE };
@@ -101,6 +105,8 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
             ScenarioAdd(s, STEP_HDR, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "transpose") == 0 && n >= 2)
             ScenarioAdd(s, STEP_TRANSPOSE, _stricmp(a1, "on") == 0 ? 1 : 0);
+        else if (_stricmp(verb, "exposure") == 0 && n >= 2)
+            ScenarioAdd(s, STEP_EXPOSURE, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "omit") == 0 && n >= 2)
         {
             if      (_stricmp(a1, "mvscale") == 0) ScenarioAdd(s, STEP_OMIT, OMIT_MVSCALE);
@@ -133,6 +139,7 @@ inline const char *StepName(const Step &s)
     case STEP_HDR:       return s.a ? "hdr on" : "hdr off";
     case STEP_TRANSPOSE: return s.a ? "transpose on" : "transpose off";
     case STEP_OMIT:      return "omit";
+    case STEP_EXPOSURE:  return s.a ? "exposure on" : "exposure off";
     }
     return "?";
 }

@@ -123,6 +123,11 @@ struct Host
     DXGI_FORMAT display_fmt = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
     Tex color, mv, depth, output;
+    // Not a fifth slot. Most games supply none, and the four are handled
+    // together everywhere; this one is its own thing, exactly as it is in the
+    // add-on under test.
+    Tex  exposure;
+    bool exposure_on = false;
     ID3D11VertexShader      *vs  = nullptr;
     ID3D11PixelShader       *ps  = nullptr;
     ID3D11Buffer            *cb  = nullptr;
@@ -208,6 +213,15 @@ static bool Rebuild(Host &h, const char *why)
         !MakeTex(h.dev, &h.output, h.out_w, h.out_h, h.display_fmt,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS))
     { printf("FAIL: textures\n"); return false; }
+
+    // 1x1 R32_FLOAT, which is the shape every exposure texture in evidence has had.
+    // Made once and kept: unlike the four above, its shape never depends on the
+    // render size. Kept out of the four deliberately, because most games supply none
+    // and the add-on under test keeps its own mirror of it out of its slot array for
+    // the same reason.
+    if (h.exposure.tex == nullptr &&
+        !MakeTex(h.dev, &h.exposure, 1, 1, DXGI_FORMAT_R32_FLOAT, D3D11_BIND_SHADER_RESOURCE))
+    { printf("FAIL: exposure texture\n"); return false; }
 
     ReleaseFeat(h);
 
@@ -388,6 +402,27 @@ static bool RenderFrame(Host &h)
         h.p->Set("Output", static_cast<ID3D11Resource *>(h.output.tex));
         h.p->Set("Depth",  static_cast<ID3D11Resource *>(h.depth.tex));
         h.p->Set("MotionVectors", static_cast<ID3D11Resource *>(h.mv.tex));
+        // The create flags deliberately never carry AutoExposure, so switching this
+        // on is the Bannerlord and Red Dead Redemption 2 shape: DLSS is driven from
+        // an exposure texture and told nothing about it.
+        if (h.exposure_on)
+        {
+            h.p->Set("ExposureTexture", static_cast<ID3D11Resource *>(h.exposure.tex));
+            // Read straight back, once. The add-on reported "no such key here" for
+            // this key across a whole run where the host believed it was setting it,
+            // and there was no way to tell whether the host's Set never landed or the
+            // add-on was reading a different block. One line settles it, on the same
+            // object, in the same frame.
+            static bool said = false;
+            if (!said)
+            {
+                said = true;
+                ID3D11Resource *back = nullptr;
+                const NVSDK_NGX_Result g = h.p->Get("ExposureTexture", &back);
+                printf("  ExposureTexture set=%p, read back 0x%08X -> %p\n",
+                       static_cast<void *>(h.exposure.tex), g, static_cast<void *>(back));
+            }
+        }
 
         const NVSDK_NGX_Result r = NVSDK_NGX_D3D11_EvaluateFeature(h.ctx, h.feat, h.p, nullptr);
         ++h.evaluated;
@@ -569,6 +604,21 @@ int main(int argc, char **argv)
             h.omit = static_cast<Omit>(st.a);
             if (st.a == OMIT_FLAGS && !Rebuild(h, "omit flags")) rc = 4;
             break;
+        case STEP_EXPOSURE:
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            h.exposure_on = st.a != 0;
+            break;
+        // Loud, not silent. A verb the parser accepted and the executor drops is a
+        // run that proves something other than what its file says -- which happened
+        // here: exposure on/off parsed, printed nothing, changed nothing, and the
+        // scenario reported PASS having tested the state it was not testing. A
+        // switch over an enum warns about this only at /Wall, so the default does
+        // the job instead.
+        default:
+            printf("[%d/%d] FAIL: step kind %d is parsed but not executed\n",
+                   s + 1, sc.count, static_cast<int>(st.kind));
+            rc = 5;
+            break;
         }
     }
 
@@ -581,6 +631,7 @@ int main(int argc, char **argv)
     if (h.vs) h.vs->Release();   if (h.ps) h.ps->Release();
     if (vsb) vsb->Release();     if (psb) psb->Release();
     h.color.Release(); h.mv.Release(); h.depth.Release(); h.output.Release();
+    h.exposure.Release();
     BOOL fs = FALSE;
     if (SUCCEEDED(h.sc->GetFullscreenState(&fs, nullptr)) && fs) h.sc->SetFullscreenState(FALSE, nullptr);
     h.sc->Release(); h.fac->Release(); h.ctx->Release(); h.dev->Release();
