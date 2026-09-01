@@ -120,6 +120,7 @@ struct Host
 
     bool dlss_on   = true;
     bool transpose = false;
+    bool stale = false;
     Omit omit      = OMIT_NONE;
     int  frame = 0, evaluated = 0, delivered = 0;
 };
@@ -461,6 +462,18 @@ static bool RenderFrame(Host &h)
         {
             h.p->Set("Width",     h.out_w); h.p->Set("Height",    h.out_h);
             h.p->Set("OutWidth",  h.rw);    h.p->Set("OutHeight", h.rh);
+        }
+        // The other misbehaviour. Baldur's Gate 3's character creator creates a
+        // preview feature through the same parameter block, and from then on
+        // every evaluate of the MAIN feature carries the preview's four scalars
+        // -- 1920x1080 -> 1280x720 on a 3413x960 -> 5120x1440 session -- while. Here
+        // 960x540 -> 640x360, which is deliberately NOT a transposition of this
+        // host's own 1280x720 -> 1920x1080: the swap repair alone would fix that.
+        // the textures and DLSS.Render.Subrect.Dimensions stay honest (#18).
+        if (h.stale)
+        {
+            h.p->Set("Width",      960u); h.p->Set("Height",     540u);
+            h.p->Set("OutWidth",   640u); h.p->Set("OutHeight",  360u);
         }
 
         NVSDK_NGX_Resource_VK rc = AsResource(h.color, false);
@@ -1011,6 +1024,10 @@ int main(int argc, char **argv)
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.transpose = st.a != 0;
+            break;
+        case STEP_STALE:
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            h.stale = st.a != 0;
             break;
         case STEP_OMIT:
             printf("[%d/%d] omit %d\n", s + 1, sc.count, st.a);

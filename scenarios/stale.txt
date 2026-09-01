@@ -1,0 +1,17 @@
+# Deliberate misbehaviour: the four scalars in the EVALUATE block belong to some
+# other feature, while the textures and DLSS.Render.Subrect.Dimensions stay
+# honest. Baldur's Gate 3 does this from its character creator onward (#18): a
+# preview feature is created through the same parameter block, and the main
+# feature's evaluates carry the preview's pair for the rest of the session. Here it is
+# 960x540 -> 640x360, deliberately not a transposition of this host's own contract,
+# which the swap repair alone would fix.
+# Under 1.3.0 the bridge read those scalars, called the frame a partial region
+# and declined every frame until restart. It must use the size the handle was
+# created with and keep delivering.
+frames 300
+stale on
+frames 1500
+stale off
+frames 300
+
+# expect: The create is used

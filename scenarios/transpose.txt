@@ -8,5 +8,7 @@ frames 600
 transpose off
 frames 300
 
-# expect-d3d11: which is the wrong way round
-# expect-vk: in preference to the four scalars its evaluates carry
+# Both backends now read the shape from the game's create rather than repairing
+# the evaluate's scalars; the swap repair stays underneath for a create that was
+# never seen.
+# expect: The create is used

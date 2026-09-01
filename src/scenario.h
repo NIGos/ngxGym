@@ -40,7 +40,7 @@
 enum StepKind
 {
     STEP_FRAMES, STEP_MODE, STEP_RESIZE, STEP_PRESET, STEP_RECREATE,
-    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT, STEP_EXPOSURE
+    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT, STEP_EXPOSURE, STEP_STALE
 };
 
 enum Mode { MODE_WINDOWED, MODE_BORDERLESS, MODE_EXCLUSIVE };
@@ -108,6 +108,8 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
             ScenarioAdd(s, STEP_HDR, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "transpose") == 0 && n >= 2)
             ScenarioAdd(s, STEP_TRANSPOSE, _stricmp(a1, "on") == 0 ? 1 : 0);
+        else if (_stricmp(verb, "stale") == 0 && n >= 2)
+            ScenarioAdd(s, STEP_STALE, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "exposure") == 0 && n >= 2)
             ScenarioAdd(s, STEP_EXPOSURE, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "omit") == 0 && n >= 2)
@@ -142,6 +144,7 @@ inline const char *StepName(const Step &s)
     case STEP_DLSS:      return s.a ? "dlss on" : "dlss off";
     case STEP_HDR:       return s.a ? "hdr on" : "hdr off";
     case STEP_TRANSPOSE: return s.a ? "transpose on" : "transpose off";
+    case STEP_STALE:     return s.a ? "stale on" : "stale off";
     case STEP_OMIT:      return "omit";
     case STEP_EXPOSURE:  return s.a ? "exposure on" : "exposure off";
     }
