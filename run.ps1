@@ -145,6 +145,15 @@ if (-not (Test-Path $log)) {
     exit 1
 }
 $txt = Get-Content $log -Raw
+
+# A recorded crash is a FAIL, and the exit code does not cover it: the add-on's own
+# handler catches the fault and the host still returns 0. Three run folders on this
+# disk held "### CRASH RECORDED ###" under a printed PASS before this existed.
+if ($txt -match '### CRASH RECORDED ###') {
+    Write-Host "FAIL: the add-on recorded a crash." -ForegroundColor Red
+    ($txt -split "`n" | Select-String -Pattern 'CRASH RECORDED' -Context 0,5) | Select-Object -First 1
+    exit 1
+}
 $m = [regex]::Match($txt, 'registered for ReShade effect events at add-on API (\d+)')
 if (-not $m.Success) {
     Write-Host "FAIL: the add-on wrote a log but never registered with ReShade." -ForegroundColor Red
@@ -162,11 +171,15 @@ if ($api -lt 10) {
 # wording: a count and a shape, so rephrasing a log line does not fail a run.
 $ready = [regex]::Matches($txt, 'feature ready: render (\d+)x(\d+) -> output (\d+)x(\d+)')
 $deliv = [regex]::Matches($txt, 'frame (\d+) delivered')
-$stood = [regex]::Match($txt, 'does nothing for the rest of this session|disabled\. Game rendering is untouched')
+# What the D3D11 bridge ACTUALLY prints when it gives up. The previous pattern
+# matched zero lines across ten stored logs while two of them contained
+# 'stopped: the DLSS feature could not be created.' -- so 'no stand-down' was never
+# a check, it was a sentence. The Vulkan alternative is kept for run-vk.ps1's sake.
+$stood = [regex]::Match($txt, 'stopped: .+The game renders normally|does nothing for the rest of this session')
 
 if ($stood.Success) {
     Write-Host "FAIL: the bridge stood down. The line above it in the log says why." -ForegroundColor Red
-    ($txt -split "`n" | Select-String -Pattern 'does nothing for the rest|disabled\.' -Context 2,0) | Select-Object -First 1
+    ($txt -split "`n" | Select-String -Pattern 'stopped: |does nothing for the rest' -Context 2,0) | Select-Object -First 1
     exit 1
 }
 if ($ready.Count -eq 0) {

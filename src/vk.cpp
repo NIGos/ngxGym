@@ -51,7 +51,10 @@ static const uint32_t kSceneFrag[] =
     if (r_ != VK_SUCCESS) { printf("FAIL: %s -> VkResult %d\n", (what), static_cast<int>(r_)); return false; } \
 } while (0)
 
-struct Push { float pan[2]; float jitter[2]; float inv_render[2]; float mv_scale[2]; };
+static const float kVelX = 0.37f;
+static const float kVelY = 0.11f;
+
+struct Push { float pan[2]; float jitter[2]; float inv_render[2]; float mv_texel[2]; };
 
 struct Img
 {
@@ -376,13 +379,14 @@ static bool RenderFrame(Host &h)
     vkCmdSetScissor(h.cmd, 0, 1, &sc);
     vkCmdBindPipeline(h.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.pipe);
     Push pc = {};
-    pc.pan[0] = static_cast<float>(h.frame) * 0.37f;
-    pc.pan[1] = static_cast<float>(h.frame) * 0.11f;
+    pc.pan[0] = static_cast<float>(h.frame) * kVelX;
+    pc.pan[1] = static_cast<float>(h.frame) * kVelY;
     pc.jitter[0] = 2.0f * jx / static_cast<float>(h.rw);
     pc.jitter[1] = 2.0f * jy / static_cast<float>(h.rh);
     pc.inv_render[0] = 1.0f / static_cast<float>(h.rw);
     pc.inv_render[1] = 1.0f / static_cast<float>(h.rh);
-    pc.mv_scale[0] = mvsx; pc.mv_scale[1] = mvsy;
+    pc.mv_texel[0] = kVelX / mvsx;
+    pc.mv_texel[1] = kVelY / mvsy;
     vkCmdPushConstants(h.cmd, h.play, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pc), &pc);
     vkCmdDraw(h.cmd, 3, 1, 0, 0);

@@ -3,7 +3,7 @@ layout(push_constant) uniform Push {
     vec2 pan;
     vec2 jitter;
     vec2 inv_render;
-    vec2 mv_scale;
+    vec2 mv_texel;
 } pc;
 
 layout(location = 0) in  vec2 v_uv;
@@ -27,10 +27,10 @@ void main()
     float n   = noise(p * 0.08) * 0.6 + noise(p * 0.31) * 0.3;
     o_color = vec4(clamp(vec3(chk * 0.8 + n, n, 1.0 - chk * 0.6) * 1.4, 0.0, 1.0), 1.0);
 
-    // Where this pixel was, minus where it is: a constant field, exactly -pan, in the
-    // units MV.Scale declares. Correct by construction rather than by differencing
-    // matrices, which is the whole reason the scene is a pan and not a camera.
-    o_mv = -pc.pan * pc.mv_scale * pc.inv_render;
+    // Where this pixel was, minus where it is: a constant field. Precomputed on the
+    // CPU as velocity/MV.Scale so the value here is the texel NGX will read, not an
+    // expression that has to be got right in two places -- see the note in the host.
+    o_mv = pc.mv_texel;
 
     gl_FragDepth = clamp(0.2 + 0.6 * v_uv.y, 0.0, 1.0);
 }

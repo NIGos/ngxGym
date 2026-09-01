@@ -16,6 +16,7 @@
 [CmdletBinding()]
 param(
     [int]    $Frames  = 300,
+    [string] $Scenario = '',
     [switch] $Register,
     [switch] $Unregister,
     # Enable VK_LAYER_KHRONOS_validation for this run. It is the only oracle this
@@ -118,10 +119,23 @@ if ($Validate) {
 
 $outf = Join-Path $run 'host.out'
 $errf = Join-Path $run 'host.err'
-$p = Start-Process -FilePath $target -ArgumentList $Frames -WorkingDirectory $run `
+$hostArg = "$Frames"
+$scfile = Join-Path $root "scenarios\$Scenario.txt"
+if ($Scenario -and (Test-Path $scfile)) {
+    Copy-Item $scfile $run
+    $hostArg = "$Scenario.txt"
+    Write-Host "scenario: $Scenario.txt"
+}
+$p = Start-Process -FilePath $target -ArgumentList $hostArg -WorkingDirectory $run `
                    -PassThru -Wait -NoNewWindow -RedirectStandardOutput $outf -RedirectStandardError $errf
 if (Test-Path $outf) { Get-Content $outf }
 Write-Host "host exit: $($p.ExitCode)"
+if ($p.ExitCode -ne 0) {
+    $hex = '0x{0:X8}' -f ([int64]$p.ExitCode -band 0xFFFFFFFFL)
+    Write-Host "FAIL: the host exited $($p.ExitCode) ($hex)." -ForegroundColor Red
+    if ((Test-Path $errf) -and (Get-Item $errf).Length -gt 0) { Get-Content $errf | Select-Object -First 20 }
+    exit 1
+}
 
 $log = Join-Path $run 'dlss5-bridge.log'
 if (-not (Test-Path $log)) {
@@ -130,6 +144,15 @@ if (-not (Test-Path $log)) {
     exit 1
 }
 $txt = Get-Content $log -Raw
+
+# A recorded crash is a FAIL, and the exit code does not cover it: the add-on's own
+# handler catches the fault and the host still returns 0. Three run folders on this
+# disk held "### CRASH RECORDED ###" under a printed PASS before this existed.
+if ($txt -match '### CRASH RECORDED ###') {
+    Write-Host "FAIL: the add-on recorded a crash." -ForegroundColor Red
+    ($txt -split "`n" | Select-String -Pattern 'CRASH RECORDED' -Context 0,5) | Select-Object -First 1
+    exit 1
+}
 $m = [regex]::Match($txt, 'registered for ReShade effect events at add-on API (\d+)')
 if (-not $m.Success) {
     Write-Host "FAIL: the add-on wrote a log but never registered with ReShade." -ForegroundColor Red
@@ -144,8 +167,12 @@ if ($Validate) {
     $v = @()
     if (Test-Path $errf) { $v += Get-Content $errf }
     if (Test-Path $outf) { $v += Get-Content $outf }
-    $vuids = $v | Select-String -Pattern 'VUID-[A-Za-z0-9-]+' -AllMatches |
-             ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending
+    # ONE match per line, not -AllMatches. Every validation message names its VUID
+    # twice, in the header and again in the spec URL, so -AllMatches doubled every
+    # count this block printed.
+    $vuids = $v | Select-String -Pattern 'Validation (Error|Warning): \[ (?<v>VUID-[A-Za-z0-9-]+)' |
+             ForEach-Object { $_.Matches[0].Groups['v'].Value } |
+             Group-Object | Sort-Object Count -Descending
     if ($vuids) {
         Write-Host "validation: $($vuids.Count) distinct VUID(s)" -ForegroundColor Yellow
         foreach ($g in $vuids) { Write-Host ("  {0,6}x  {1}" -f $g.Count, $g.Name) }

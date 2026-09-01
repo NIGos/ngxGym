@@ -49,7 +49,7 @@ cbuffer C : register(b0)
     float2 pan;
     float2 jitter;
     float2 inv_render;
-    float2 mv_scale;
+    float2 mv_texel;
 };
 
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
@@ -83,13 +83,13 @@ PSOut ps(VSOut i)
     float  chk = step(0.5, frac(floor(p.x / 24.0) * 0.5 + floor(p.y / 24.0) * 0.5));
     float  n   = noise(p * 0.08) * 0.6 + noise(p * 0.31) * 0.3;
     o.color = float4(saturate(float3(chk * 0.8 + n, n, 1.0 - chk * 0.6) * 1.4), 1);
-    o.mv    = -pan * mv_scale * inv_render;
+    o.mv    = mv_texel;
     o.depth = saturate(0.2 + 0.6 * i.uv.y);
     return o;
 }
 )";
 
-struct CB { float pan[2]; float jitter[2]; float inv_render[2]; float mv_scale[2]; };
+struct CB { float pan[2]; float jitter[2]; float inv_render[2]; float mv_texel[2]; };
 
 struct Tex
 {
@@ -145,6 +145,20 @@ struct Host
     RECT     windowed_rect = {};
     LONG_PTR windowed_style = 0;
 };
+
+    // The motion vector, computed on the CPU and written verbatim. It used to be
+    // "-pan * mv_scale * inv_render" under a comment claiming it was correct by
+    // construction, and it was wrong twice over: it multiplied by the very scale
+    // NGX multiplies by, and it encoded the CUMULATIVE pan rather than the per-frame
+    // delta. At frame 100 with a 1280-wide render that wrote 37.0, which NGX read as
+    // 47360 pixels of motion. It is right on frame 1 and only there, which is how it
+    // survived being read several times.
+    //
+    // Doing the arithmetic on the CPU is not a shortcut: it puts the value where it
+    // can be printed and checked against MV.Scale, which is the only way anyone was
+    // ever going to notice.
+static const float kVelX = 0.37f;
+static const float kVelY = 0.11f;
 
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -344,8 +358,8 @@ static bool RenderFrame(Host &h)
 {
     const float jx = Halton((h.frame % 32) + 1, 2) - 0.5f;
     const float jy = Halton((h.frame % 32) + 1, 3) - 0.5f;
-    const float panx = static_cast<float>(h.frame) * 0.37f;
-    const float pany = static_cast<float>(h.frame) * 0.11f;
+    const float panx = static_cast<float>(h.frame) * kVelX;
+    const float pany = static_cast<float>(h.frame) * kVelY;
     const float mvsx = -static_cast<float>(h.rw), mvsy = -static_cast<float>(h.rh);
 
     D3D11_MAPPED_SUBRESOURCE ms = {};
@@ -357,7 +371,11 @@ static bool RenderFrame(Host &h)
         c.jitter[1] = -2.0f * jy / static_cast<float>(h.rh);
         c.inv_render[0] = 1.0f / static_cast<float>(h.rw);
         c.inv_render[1] = 1.0f / static_cast<float>(h.rh);
-        c.mv_scale[0] = mvsx; c.mv_scale[1] = mvsy;
+        // The pattern pans by +kVelX per frame, so a feature now was at x + kVelX
+        // last frame; DLSS wants previous-minus-current, which is +kVelX pixels.
+        // Divided by MV.Scale because NGX multiplies by it.
+        c.mv_texel[0] = kVelX / mvsx;
+        c.mv_texel[1] = kVelY / mvsy;
         memcpy(ms.pData, &c, sizeof(c));
         h.ctx->Unmap(h.cb, 0);
     }
@@ -439,11 +457,23 @@ static bool RenderFrame(Host &h)
     ID3D11Texture2D *bb = nullptr;
     if (SUCCEEDED(h.sc->GetBuffer(0, IID_PPV_ARGS(&bb))) && bb != nullptr)
     {
-        // With DLSS off the output texture holds the last upscaled frame, which is
-        // stale. Present the render target instead, letterboxed by the copy's own
-        // clamp -- what matters is that presents keep happening, because that is
-        // what the bridge counts to decide the game has gone quiet.
-        h.ctx->CopyResource(bb, h.dlss_on && h.feat != nullptr ? h.output.tex : h.output.tex);
+        // Both arms of this were the same texture, under a comment describing a
+        // choice that was never made -- so the DLSS-off segment presented one frozen
+        // upscaled frame for nine hundred frames. The colour target is the render
+        // resolution and the back buffer is the output resolution, so it cannot be
+        // a CopyResource; CopySubresourceRegion places it in the corner, which is
+        // ugly and is not the point. What matters is that presents keep happening
+        // and that what is presented CHANGES, because a frozen image is
+        // indistinguishable from a bridge that has stopped.
+        if (h.dlss_on && h.feat != nullptr)
+        {
+            h.ctx->CopyResource(bb, h.output.tex);
+        }
+        else
+        {
+            D3D11_BOX box = { 0, 0, 0, h.rw, h.rh, 1 };
+            h.ctx->CopySubresourceRegion(bb, 0, 0, 0, 0, h.color.tex, 0, &box);
+        }
         bb->Release();
     }
     h.sc->Present(0, 0);
