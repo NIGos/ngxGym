@@ -16,7 +16,7 @@ float4 PS_Passthrough(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Targe
     return tex2D(ReShade::BackBuffer, uv);
 }
 
-technique ngxhost_probe
+technique ngxGym_probe
 {
     pass
     {

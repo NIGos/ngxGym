@@ -1,4 +1,4 @@
-# ngxhost -- stage a run folder and launch one scenario in a fresh process.
+# ngxGym -- stage a run folder and launch one scenario in a fresh process.
 #
 # Fresh process per scenario is load-bearing, not tidiness. The add-on is full of
 # one-way process-lifetime latches -- a refusal that never clears, "said once" log
@@ -26,7 +26,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root   = Split-Path -Parent $MyInvocation.MyCommand.Path
-$exe    = Join-Path $root 'bin\ngxhost.exe'
+$exe    = Join-Path $root 'bin\ngxGym.exe'
 $addon  = 'C:\Users\quali\Documents\Code Projects\Misc\ngxbridge\dlss5-bridge.addon64'
 $shade  = 'C:\ProgramData\ReShade\ReShade64.dll'
 
@@ -88,7 +88,7 @@ else { Write-Warning "no renodx-dlss5.addon64 beside the snippet: the bridge wil
 if (-not $NoEffects) {
     Copy-Item (Join-Path $root 'reshade-fx') (Join-Path $run 'fx') -Recurse
     $effectLines = "EffectSearchPaths=.\fx`nTextureSearchPaths=.\fx"
-    $presetBody  = "[ngxhost_probe.fx]`n`nTechniques=ngxhost_probe@ngxhost_probe.fx`n"
+    $presetBody  = "[ngxGym_probe.fx]`n`nTechniques=ngxGym_probe@ngxGym_probe.fx`n"
 } else {
     $effectLines = ""
     $presetBody  = "Techniques=`n"
@@ -135,7 +135,7 @@ if (Test-Path $scfile) {
 # no output is not a bug report. host.out survives the process either way.
 $outf = Join-Path $run 'host.out'
 $errf = Join-Path $run 'host.err'
-$p = Start-Process -FilePath (Join-Path $run 'ngxhost.exe') -ArgumentList $hostArg `
+$p = Start-Process -FilePath (Join-Path $run 'ngxGym.exe') -ArgumentList $hostArg `
                    -WorkingDirectory $run -PassThru -Wait -NoNewWindow `
                    -RedirectStandardOutput $outf -RedirectStandardError $errf
 if (Test-Path $outf) { Get-Content $outf }

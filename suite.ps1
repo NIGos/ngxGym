@@ -1,4 +1,4 @@
-# ngxhost -- run every scenario on both backends and print one table.
+# ngxGym -- run every scenario on both backends and print one table.
 #
 #   .\suite.ps1                 both backends, every scenario
 #   .\suite.ps1 -Only vk        one backend

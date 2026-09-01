@@ -1,4 +1,4 @@
-// ngxhost -- a scriptable DLSS host, built to be a game as far as ReShade and the
+// ngxGym -- a scriptable DLSS host, built to be a game as far as ReShade and the
 // dlss5-bridge add-on are concerned, so that the transitions those two fail on can
 // be reproduced in seconds instead of by launching Baldur's Gate 3 and playing to a
 // particular state.
@@ -548,16 +548,16 @@ int main(int argc, char **argv)
         ScenarioAdd(&sc, STEP_FRAMES, argc > 1 ? atoi(argv[1]) : 600);
         strncpy_s(sc.name, "smoke", _TRUNCATE);
     }
-    printf("ngxhost: scenario '%s', %d steps\n", sc.name, sc.count);
+    printf("ngxGym: scenario '%s', %d steps\n", sc.name, sc.count);
 
     Host h;
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc); wc.lpfnWndProc = WndProc;
-    wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"ngxhost";
+    wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"ngxGym";
     RegisterClassExW(&wc);
     RECT r = { 0, 0, static_cast<LONG>(h.out_w), static_cast<LONG>(h.out_h) };
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    h.hwnd = CreateWindowExW(0, L"ngxhost", L"ngxhost", WS_OVERLAPPEDWINDOW,
+    h.hwnd = CreateWindowExW(0, L"ngxGym", L"ngxGym", WS_OVERLAPPEDWINDOW,
                              CW_USEDEFAULT, CW_USEDEFAULT,
                              r.right - r.left, r.bottom - r.top,
                              nullptr, nullptr, wc.hInstance, nullptr);

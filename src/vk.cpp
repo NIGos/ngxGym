@@ -1,4 +1,4 @@
-// ngxhost-vk -- the Vulkan half.
+// ngxGym-vk -- the Vulkan half.
 //
 // PHASE 4b. A real Vulkan DLSS host: a moving scene into four images, sub-pixel
 // jitter, motion vectors correct by construction, and a real NGX SuperSampling
@@ -779,8 +779,8 @@ static bool Setup(Host &h)
     }
 
     VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
-    app.pApplicationName = "ngxhost"; app.applicationVersion = 1;
-    app.pEngineName = "ngxhost"; app.engineVersion = 1;
+    app.pApplicationName = "ngxGym"; app.applicationVersion = 1;
+    app.pEngineName = "ngxGym"; app.engineVersion = 1;
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     ici.pApplicationInfo = &app;
@@ -914,16 +914,16 @@ int main(int argc, char **argv)
         ScenarioAdd(&sc, STEP_FRAMES, argc > 1 ? atoi(argv[1]) : 600);
         strncpy_s(sc.name, "smoke", _TRUNCATE);
     }
-    printf("ngxhost-vk: scenario '%s', %d steps\n", sc.name, sc.count);
+    printf("ngxGym-vk: scenario '%s', %d steps\n", sc.name, sc.count);
 
     Host h;
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc); wc.lpfnWndProc = WndProc;
-    wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"ngxhostvk";
+    wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"ngxGymvk";
     RegisterClassExW(&wc);
     RECT r = { 0, 0, static_cast<LONG>(h.out_w), static_cast<LONG>(h.out_h) };
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    h.hwnd = CreateWindowExW(0, L"ngxhostvk", L"ngxhost-vk", WS_OVERLAPPEDWINDOW,
+    h.hwnd = CreateWindowExW(0, L"ngxGymvk", L"ngxGym-vk", WS_OVERLAPPEDWINDOW,
                              CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                              nullptr, nullptr, wc.hInstance, nullptr);
     if (h.hwnd == nullptr) { printf("FAIL: no window\n"); return 2; }

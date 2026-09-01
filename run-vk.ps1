@@ -1,4 +1,4 @@
-# ngxhost -- stage and run the Vulkan host.
+# ngxGym -- stage and run the Vulkan host.
 #
 # Separate from run.ps1 for one reason that is not cosmetic. On Vulkan ReShade is an
 # implicit layer registered machine-wide and gated PER EXECUTABLE PATH by
@@ -30,11 +30,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$exe   = Join-Path $root 'bin\ngxhost-vk.exe'
+$exe   = Join-Path $root 'bin\ngxGym-vk.exe'
 $addon = 'C:\Users\quali\Documents\Code Projects\Misc\ngxbridge\dlss5-bridge.addon64'
 $apps  = 'C:\ProgramData\ReShade\ReShadeApps.ini'
 $run   = Join-Path $root 'run\vk'
-$target = Join-Path $run 'ngxhost-vk.exe'
+$target = Join-Path $run 'ngxGym-vk.exe'
 
 if (-not (Test-Path $exe)) { Write-Error "missing: $exe (build.cmd skips it without the Vulkan SDK)"; exit 2 }
 
@@ -82,7 +82,7 @@ if (Test-Path $Snippet) {
 }
 
 Copy-Item (Join-Path $root 'reshade-fx') (Join-Path $run 'fx') -Recurse
-"[ngxhost_probe.fx]`n`nTechniques=ngxhost_probe@ngxhost_probe.fx`n" |
+"[ngxGym_probe.fx]`n`nTechniques=ngxGym_probe@ngxGym_probe.fx`n" |
     Set-Content -Path (Join-Path $run 'default.ini') -Encoding ASCII
 @"
 [GENERAL]

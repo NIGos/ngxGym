@@ -1,4 +1,4 @@
-# ngxhost
+# ngxGym
 
 Two small games that are not games. They create a real D3D11 or Vulkan device,
 call real NVIDIA NGX, run a real DLSS feature over a moving scene, and put the
