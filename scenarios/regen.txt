@@ -1,0 +1,12 @@
+# A settings file from another version is replaced with this version's defaults
+# at attach, not read. The file is seeded here without a version stamp and with
+# one key set away from its default and one this build never had; the config
+# echo must show the default, and the log must say the file was replaced.
+frames 120
+
+# cfg-old-file
+# cfg: flags=108
+# cfg: drain=1
+
+# expect: has been replaced with the defaults of
+# expect: flags=-1 subrects=1

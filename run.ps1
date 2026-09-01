@@ -169,6 +169,14 @@ if ($Scenario -and (Test-Path $scfile)) {
         Write-Host ("scenario config: " + ($extra -join ', '))
     }
 }
+# The add-on replaces a settings file from another version with its defaults at
+# attach, which would silently drop every "# cfg:" line above. So the seeded file
+# is stamped "keep" -- unless the scenario says "# cfg-old-file", which is how the
+# replacement itself is tested.
+$cfgPath = Join-Path $run 'dlss5-bridge.cfg'
+if (-not ($Scenario -and (Test-Path $scfile) -and (Select-String -Path $scfile -Pattern '^#\s*cfg-old-file' -Quiet))) {
+    Set-Content -Path $cfgPath -Value (@('# dlss5-bridge keep') + @(Get-Content $cfgPath)) -Encoding ASCII
+}
 # Fast mode. Frames are what the suite spends its wall clock on: 20,950 of them
 # per backend, and omissions alone is 9,500. Nothing in a contract check needs
 # that many -- the counts are large so a real title has time to settle, and this

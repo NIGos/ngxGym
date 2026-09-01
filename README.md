@@ -70,6 +70,11 @@ that run. It exists because a behaviour gated behind a key would otherwise be
 untestable: `dlss-off` needs `synth=1` to reach the source-latch release, and
 that key is off by default on purpose.
 
+The generated file is stamped `# dlss5-bridge keep` on its first line, because
+the add-on replaces a settings file from another version with its defaults at
+attach and that would drop every `# cfg:` line. A line starting `# cfg-old-file`
+leaves the stamp off, which is how `regen` tests the replacement itself.
+
 A line starting `# expect:` names something the add-on's log must contain for
 the run to pass. `# expect-d3d11:` and `# expect-vk:` do the same for one
 backend, which is what the two logs word differently.
