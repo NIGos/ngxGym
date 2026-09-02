@@ -322,6 +322,8 @@ static bool Rebuild(Host &h, const char *why)
                                   static_cast<NVSDK_NGX_PerfQuality_Value>(h.quality),
                                   &h.rw, &h.rh, &maxw, &maxh, &minw, &minh, &sharp);
     if (h.rw == 0 || h.rh == 0) { h.rw = h.out_w; h.rh = h.out_h; }
+    // With its DLSS off a game renders at the output size; see the D3D11 host.
+    if (!h.dlss_on) { h.rw = h.out_w; h.rh = h.out_h; }
     printf("  rebuild (%s): %ux%u -> %ux%u, quality %d\n", why, h.rw, h.rh, h.out_w, h.out_h, h.quality);
 
     const VkImageUsageFlags cu = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
@@ -1064,8 +1066,7 @@ int main(int argc, char **argv)
         case STEP_DLSS:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.dlss_on = st.a != 0;
-            // Back on after a rebuild that skipped the create: build one now.
-            if (h.dlss_on && h.feat == nullptr && !Rebuild(h, "dlss on")) rc = 4;
+            if (!Rebuild(h, st.a ? "dlss on" : "dlss off")) rc = 4;
             break;
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));

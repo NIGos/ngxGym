@@ -45,7 +45,11 @@ foreach ($b in $backends) {
             if ($Fast) { $args['Scale'] = 8 }
             if ($Background) { $args['Background'] = $true }
             if ($Validate -and $b -eq 'vk') { $args['Validate'] = $true }
-            $out = & $runner @args 2>&1
+            # A runner that dies of a script error never reaches its own exit, and
+            # $LASTEXITCODE would still hold the previous runner's 0. Preset it, and
+            # treat an exception as the failure it is.
+            $global:LASTEXITCODE = -1
+            try { $out = & $runner @args 2>&1 } catch { $out = "runner error: $_"; $global:LASTEXITCODE = -1 }
             if ($LASTEXITCODE -eq 0) { $pass++ }
             else {
                 $fail++
@@ -77,7 +81,10 @@ if ($Only -ne 'vk') {
         $a = @{ Scenario = 'consumer'; Frames = $Frames }
         if ($Background) { $a['Background'] = $true }
         if (-not $with) { $a['NoConsumer'] = $true }
-        & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null
+        $global:LASTEXITCODE = -1
+        try { & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null } catch { $global:LASTEXITCODE = -1 }
+        if ($LASTEXITCODE -ne 0) { Write-Host ("  FAIL: the {0} run exited {1}." -f ($with ? 'with-consumer' : 'without-consumer'), $LASTEXITCODE) -ForegroundColor Red; $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why="runner exit $LASTEXITCODE" }; $hashes = $null; break }
+        if ($with -and -not (Select-String -Path (Join-Path $root 'run/consumer/ReShade.log') -Pattern 'DLSS5 Generic' -Quiet)) { Write-Host '  FAIL: the with-consumer run has no DLSS 5 add-on in it.' -ForegroundColor Red; $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='consumer not staged' }; $hashes = $null; break }
         # Read from the LOG, not from the runner's output. Write-Host does not
         # go down the pipeline, and capturing it is how this check silently
         # compared two empty strings the first time it ran.
@@ -86,7 +93,8 @@ if ($Only -ne 'vk') {
         $hashes[$with] = if ($line) { [regex]::Match($line.ToString(), '([0-9A-F]{16})').Groups[1].Value } else { '' }
         Write-Host ('  {0,-14} {1}' -f ($with ? 'with consumer' : 'without'), $hashes[$with])
     }
-    if (-not $hashes[$true] -or -not $hashes[$false]) {
+    if ($null -eq $hashes) { }
+    elseif (-not $hashes[$true] -or -not $hashes[$false]) {
         Write-Host '  FAIL: no output hash. The scenario must carry # cfg: hash_out=1.' -ForegroundColor Red
         $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='no hash' }
     } elseif ($hashes[$true] -eq $hashes[$false]) {
@@ -112,7 +120,10 @@ if ($Only -ne 'vk') {
         $a = @{ Scenario = 'brightness'; Frames = $Frames }
         if ($Background) { $a['Background'] = $true }
         if (-not $with) { $a['NoConsumer'] = $true }
-        & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null
+        $global:LASTEXITCODE = -1
+        try { & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null } catch { $global:LASTEXITCODE = -1 }
+        if ($LASTEXITCODE -ne 0) { Write-Host ("  FAIL: the {0} run exited {1}." -f ($with ? 'with-consumer' : 'without-consumer'), $LASTEXITCODE) -ForegroundColor Red; $means = $null; break }
+        if ($with -and -not (Select-String -Path (Join-Path $root 'run/brightness/ReShade.log') -Pattern 'DLSS5 Generic' -Quiet)) { Write-Host '  FAIL: the with-consumer run has no DLSS 5 add-on in it.' -ForegroundColor Red; $means = $null; break }
         $cl = Join-Path $root 'run/brightness/dlss5-bridge.log'
         $m = @{}
         if (Test-Path $cl) {
@@ -123,6 +134,7 @@ if ($Only -ne 'vk') {
         $means[$with] = $m
     }
     $fail = $false
+    if ($null -eq $means) { $fail = $true; $means = @{ $true = @{}; $false = @{} } }
     foreach ($fmt in $means[$false].Keys) {
         if (-not $means[$true].ContainsKey($fmt)) { Write-Host ('  {0,-24} no reading with the consumer' -f $fmt) -ForegroundColor Red; $fail = $true; continue }
         $w = $means[$true][$fmt]; $wo = $means[$false][$fmt]
@@ -142,5 +154,5 @@ if ($bad.Count -gt 0) {
     exit 1
 }
 Write-Host ('all {0} scenario run(s) passed.{1}' -f ($rows | Measure-Object Pass -Sum).Sum,
-            $(if ($Fast) { ' FAST: a fraction of the frames, so a cadence or latch regression is not covered.' } else { '' })) -ForegroundColor Green
+            $(if ($Fast) { ' FAST: a fraction of the frames, so a cadence or latch regression is not covered, and the mirror advancing check never applies on D3D11.' } else { '' })) -ForegroundColor Green
 exit 0

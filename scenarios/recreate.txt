@@ -9,5 +9,5 @@ frames 300
 recreate
 frames 300
 
-# expect-d3d11: rebuilding
-# expect-vk: building the D3D12 feature
+# expect-after-d3d11: the game created its feature again :: rebuilding: render
+# expect-vk: the game replaced its own feature

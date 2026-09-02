@@ -52,11 +52,11 @@ $exe    = Join-Path $root 'bin/ngxGym.exe'
 $addon  = if ($Addon) { $Addon }
           elseif (Test-Path (Join-Path $root 'dlss5-bridge.addon64')) { Join-Path $root 'dlss5-bridge.addon64' }
           else { Join-Path (Split-Path -Parent $root) 'ngxbridge/dlss5-bridge.addon64' }
-if (-not (Test-Path $addon)) { Write-Error "no dlss5-bridge.addon64: put one beside this script or pass -Addon"; exit 2 }
+if (-not (Test-Path $addon)) { Write-Host "FAIL: no dlss5-bridge.addon64: put one beside this script or pass -Addon" -ForegroundColor Red; exit 2 }
 $shade  = $Shade
 
 foreach ($p in @($exe, $addon, $shade)) {
-    if (-not (Test-Path $p)) { Write-Error "missing: $p"; exit 2 }
+    if (-not (Test-Path $p)) { Write-Host "FAIL: missing: $p" -ForegroundColor Red; exit 2 }
 }
 
 $run = Join-Path $root "run/$Scenario"
@@ -123,7 +123,13 @@ if (-not $NoSnippet) {
 $dlss5 = if ($snipDir) { Get-ChildItem $snipDir -Filter 'renodx-dlss5*.addon64' -EA SilentlyContinue | Select-Object -First 1 } else { $null }
 if ($dlss5 -and -not $NoConsumer) { Copy-Item $dlss5.FullName (Join-Path $run 'renodx-dlss5.addon64') }
 elseif ($NoConsumer) { Write-Host 'consumer: not staged (-NoConsumer)' -ForegroundColor DarkGray }
-else { Write-Warning "no renodx-dlss5.addon64 beside the snippet: the bridge will mirror to nobody." }
+else {
+    # A run with no consumer proves the bridge built a contract for nobody, and
+    # every row of the suite went green that way once. Asked for with
+    # -NoConsumer, it is the other half of the consumer check; unasked, it fails.
+    Write-Host "FAIL: no renodx-dlss5*.addon64 beside the snippet. Put one there, or pass -NoConsumer on purpose." -ForegroundColor Red
+    exit 2
+}
 
 # ReShade needs to be told where add-ons and effects live, and not to show a
 # tutorial to nobody.
@@ -345,22 +351,25 @@ if ($mir.Count -ge 2 -and
     exit 1
 }
 
-# Did whatever was delivering keep delivering after the LAST runtime teardown?
-# The mirror counter above is sampled first-to-last over the whole run, so a
-# source that delivered for a thousand frames and then stopped at the first
-# mode change still shows movement. The add-on logs a cumulative delivered count
-# every 600 frames from every source, mirror or substitute; if the log has a
-# runtime being recreated, the samples after the last recreation must rise.
-# Fewer than two samples after it means the tail was too short to say, and the
-# run stays covered by the gates above -- give the scenario a longer tail.
-$lastRt = $txt.LastIndexOf('created an effect runtime on')
-if ($lastRt -ge 0) {
-    $after = [regex]::Matches($txt.Substring($lastRt), '(\d+) frames delivered so far')
-    if ($after.Count -ge 2 -and
-        [int]$after[$after.Count-1].Groups[1].Value -le [int]$after[0].Groups[1].Value) {
-        Write-Host "FAIL: delivery stopped after the last runtime teardown ($($after[0].Groups[1].Value) -> $($after[$after.Count-1].Groups[1].Value) over $($after.Count) samples)." -ForegroundColor Red
-        exit 1
-    }
+# A source that stops delivering after a teardown simply prints no more
+# delivered-count lines, and a rule keyed on those lines rising could never
+# fail. Scenarios say it themselves instead: "# expect-after: created an effect
+# runtime :: frames delivered so far" needs a count line after the last runtime
+# ReShade created, and a stopped source has none.
+
+# The host counts its own NGX evaluates and how many succeeded, and fails only
+# when none did; a run whose evaluates fail from "stale on" onward still exited 0.
+$hv = [regex]::Match((Get-Content $outf -Raw -ErrorAction SilentlyContinue), 'frames (\d+), evaluates (\d+), succeeded (\d+)')
+# "# host-may-fail" (or -d3d11): the scenario asks NGX itself for something it
+# refuses, and the refusal is the point rather than a defect in the host.
+$hostmayfail = $Scenario -and (Test-Path $scfile) -and (Select-String -Path $scfile -Pattern '^#\s*host-may-fail(-d3d11)?\b' -Quiet)
+if (-not $hostmayfail -and $hv.Success -and [int]$hv.Groups[2].Value -gt 0 -and [int]$hv.Groups[3].Value -lt [int]$hv.Groups[2].Value) {
+    Write-Host ("FAIL: the host's own DLSS evaluate failed {0} of {1} times." -f ([int]$hv.Groups[2].Value - [int]$hv.Groups[3].Value), $hv.Groups[2].Value) -ForegroundColor Red
+    exit 1
+}
+# A step the host refused rather than performed is said, not hidden (item 13).
+foreach ($sk in (Select-String -Path $outf -Pattern 'refused, this run is in the background' -ErrorAction SilentlyContinue)) {
+    Write-Host ("  SKIP: " + $sk.Line.Trim()) -ForegroundColor DarkYellow
 }
 
 # What this particular scenario says its own log must contain. Opt-in: a scenario
@@ -380,8 +389,8 @@ if (Test-Path $scfile) {
     }
     # "# expect-after: A :: B": some B after the LAST A. What "# expect:" cannot
     # say -- that a thing happened again after a teardown, not only before it.
-    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect-after:\s*(.+?)\s*::\s*(.+)$')) {
-        $a = $m.Matches[0].Groups[1].Value.Trim(); $b = $m.Matches[0].Groups[2].Value.Trim()
+    foreach ($m in (Select-String -Path $scfile -Pattern ('^#\s*expect-after(-d3d11)?:\s*(.+?)\s*::\s*(.+)$'))) {
+        $a = $m.Matches[0].Groups[2].Value.Trim(); $b = $m.Matches[0].Groups[3].Value.Trim()
         $ia = $txt.LastIndexOf($a)
         if ($ia -lt 0) {
             Write-Host "FAIL: the scenario expects '$b' after '$a', and '$a' is not in the log at all." -ForegroundColor Red

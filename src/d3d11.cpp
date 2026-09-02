@@ -259,6 +259,12 @@ static bool Rebuild(Host &h, const char *why)
         h.rh = static_cast<UINT>(h.out_h * r + 0.5f);
     }
     if (h.rw == 0 || h.rh == 0) { h.rw = h.out_w; h.rh = h.out_h; }
+    // With its DLSS off a game renders at the output size, and its depth buffer
+    // is the back buffer's size -- which is the one precondition the substitute
+    // contract has. Rendering at the DLSS size with DLSS off is what no game
+    // does, and it hid a bridge defect: the substitute's contract built with
+    // the game's create shape looked right only because both were DLAA here.
+    if (!h.dlss_on) { h.rw = h.out_w; h.rh = h.out_h; }
 
     printf("  rebuild (%s): %ux%u -> %ux%u, quality %d, hdr %d\n",
            why, h.rw, h.rh, h.out_w, h.out_h, h.quality, h.hdr ? 1 : 0);
@@ -878,8 +884,9 @@ int main(int argc, char **argv)
         case STEP_DLSS:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.dlss_on = st.a != 0;
-            // Back on after a rebuild that skipped the create: build one now.
-            if (h.dlss_on && h.feat == nullptr && !Rebuild(h, "dlss on")) rc = 4;
+            // Off: the textures go to the output size and the feature is released
+            // (Rebuild creates none while off). On: the feature is built again.
+            if (!Rebuild(h, st.a ? "dlss on" : "dlss off")) rc = 4;
             break;
         case STEP_HDR:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));

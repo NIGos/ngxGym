@@ -8,4 +8,4 @@ frames 600
 
 # vk-only
 
-# expect: building the D3D12 feature
+# expect: the game replaced its own feature

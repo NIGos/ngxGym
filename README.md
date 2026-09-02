@@ -102,7 +102,8 @@ Directives in comments:
 | Line | Effect |
 | --- | --- |
 | `# expect: text` | the add-on's log must contain it. `# expect-d3d11:` and `# expect-vk:` for one backend |
-| `# expect-after: A :: B` | some B after the last A |
+| `# expect-after: A :: B` | some B after the last A. `# expect-after-d3d11:` and `# expect-after-vk:` for one backend |
+| `# host-may-fail` | the host's own NGX evaluates may fail without failing the run; `-d3d11` / `-vk` for one backend |
 | `# cfg: key=value` | appended to the generated `dlss5-bridge.cfg` |
 | `# cfg-old-file` | leave the settings file unstamped, to test its replacement |
 | `# nofast` | run in full under `-Fast` |
@@ -118,9 +119,11 @@ passing it.
 A run passes when the host exits 0, the add-on registered with ReShade,
 recorded no crash, built at least one feature, delivered or recorded at least
 one frame, never stood down, and every `# expect` line holds. On Vulkan the
-mirror also has to come back after every effect-runtime teardown. Where the
-substitute contract holds the session, the cumulative delivered count the
-add-on logs every 600 frames has to keep rising after the last teardown.
+mirror also has to come back after every effect-runtime teardown, and the
+host's own DLSS evaluates all have to succeed. Where the substitute contract
+holds the session, a delivered-count line has to appear after it armed, and
+the scenarios with teardowns require one after the last runtime ReShade
+created.
 
 The suite adds one check that measures the neighbour rather than the add-on:
 `consumer` runs twice, with and without the DLSS 5 add-on staged, and the

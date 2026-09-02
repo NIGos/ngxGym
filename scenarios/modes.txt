@@ -10,5 +10,5 @@ frames 300
 mode windowed
 frames 300
 
-# expect-d3d11: rebuilding
-# expect-vk: building the D3D12 feature
+# expect-after-d3d11: the game created its feature again :: rebuilding: render
+# expect-after-vk: ReShade created an effect runtime :: building the D3D12 feature

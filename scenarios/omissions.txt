@@ -20,5 +20,10 @@ frames 1900
 omit quality
 frames 1900
 
-# expect-d3d11: the neutral from nvsdk_ngx_helpers.h
+# expect-d3d11: the game sets no MV.Scale.X
+# expect-d3d11: the game sets no Jitter.Offset.X
 # expect-vk: so the mirrored feature is created with zero
+# NGX on Vulkan refuses an evaluate with no Jitter.Offset (0xBAD00005, every
+# frame of that segment) where NGX on D3D11 accepts one. That is the DLL under
+# test, not this host, and the segment is here for the bridge's report of it.
+# host-may-fail-vk

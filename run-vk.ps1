@@ -42,12 +42,12 @@ $exe   = Join-Path $root 'bin/ngxGym-vk.exe'
 $addon = if ($Addon) { $Addon }
          elseif (Test-Path (Join-Path $root 'dlss5-bridge.addon64')) { Join-Path $root 'dlss5-bridge.addon64' }
          else { Join-Path (Split-Path -Parent $root) 'ngxbridge/dlss5-bridge.addon64' }
-if (-not (Test-Path $addon)) { Write-Error "no dlss5-bridge.addon64: put one beside this script or pass -Addon"; exit 2 }
+if (-not (Test-Path $addon)) { Write-Host "FAIL: no dlss5-bridge.addon64: put one beside this script or pass -Addon" -ForegroundColor Red; exit 2 }
 $apps  = 'C:\ProgramData\ReShade\ReShadeApps.ini'
 $run   = Join-Path $root 'run/vk'
 $target = Join-Path $run 'ngxGym-vk.exe'
 
-if (-not (Test-Path $exe)) { Write-Error "missing: $exe (build.cmd skips it without the Vulkan SDK)"; exit 2 }
+if (-not (Test-Path $exe)) { Write-Host "FAIL: missing: $exe (build.cmd skips it without the Vulkan SDK)" -ForegroundColor Red; exit 2 }
 
 function Get-Apps {
     if (-not (Test-Path $apps)) { return @() }
@@ -262,8 +262,11 @@ $synth = $txt -match '\[synth\] arming'
 $down = [regex]::Matches($txt, 'the game is destroying the effect runtime')
 $rearm = [regex]::Matches($txt, 'the mirror is armed again')
 if ($synth) {
-    if (([regex]::Matches($txt, 'frames delivered so far')).Count -eq 0) {
-        Write-Host "FAIL: the substitute contract armed and never reached 600 delivered frames." -ForegroundColor Red
+    # After it armed: the count is shared with the mirror, whose frames before
+    # DLSS was switched off would satisfy a plain search.
+    $armedAt = $txt.LastIndexOf('[synth] arming')
+    if ($armedAt -lt 0 -or $txt.IndexOf('frames delivered so far', $armedAt) -lt 0) {
+        Write-Host "FAIL: the substitute contract armed and never reached 600 delivered frames after arming." -ForegroundColor Red
         exit 1
     }
 } else {
@@ -290,22 +293,20 @@ if ($synth) {
 }
 
 # What this particular scenario says its own log must contain. Opt-in, as on the
-# Did whatever was delivering keep delivering after the LAST runtime teardown?
-# The mirror counter above is sampled first-to-last over the whole run, so a
-# source that delivered for a thousand frames and then stopped at the first
-# mode change still shows movement. The add-on logs a cumulative delivered count
-# every 600 frames from every source, mirror or substitute; if the log has a
-# runtime being recreated, the samples after the last recreation must rise.
-# Fewer than two samples after it means the tail was too short to say, and the
-# run stays covered by the gates above -- give the scenario a longer tail.
-$lastRt = $txt.LastIndexOf('created an effect runtime on')
-if ($lastRt -ge 0) {
-    $after = [regex]::Matches($txt.Substring($lastRt), '(\d+) frames delivered so far')
-    if ($after.Count -ge 2 -and
-        [int]$after[$after.Count-1].Groups[1].Value -le [int]$after[0].Groups[1].Value) {
-        Write-Host "FAIL: delivery stopped after the last runtime teardown ($($after[0].Groups[1].Value) -> $($after[$after.Count-1].Groups[1].Value) over $($after.Count) samples)." -ForegroundColor Red
-        exit 1
-    }
+# A source that stops delivering after a teardown prints no more delivered-count
+# lines, so no rule on those lines rising can fail; scenarios use
+# "# expect-after: created an effect runtime :: frames delivered so far".
+
+$hv = [regex]::Match((Get-Content $outf -Raw -ErrorAction SilentlyContinue), 'frames (\d+), evaluates (\d+), succeeded (\d+)')
+# "# host-may-fail" (or -vk): the scenario asks NGX itself for something it
+# refuses, and the refusal is the point rather than a defect in the host.
+$hostmayfail = $Scenario -and (Test-Path $scfile) -and (Select-String -Path $scfile -Pattern '^#\s*host-may-fail(-vk)?\b' -Quiet)
+if (-not $hostmayfail -and $hv.Success -and [int]$hv.Groups[2].Value -gt 0 -and [int]$hv.Groups[3].Value -lt [int]$hv.Groups[2].Value) {
+    Write-Host ("FAIL: the host's own DLSS evaluate failed {0} of {1} times." -f ([int]$hv.Groups[2].Value - [int]$hv.Groups[3].Value), $hv.Groups[2].Value) -ForegroundColor Red
+    exit 1
+}
+foreach ($sk in (Select-String -Path $outf -Pattern 'refused, this run is in the background' -ErrorAction SilentlyContinue)) {
+    Write-Host ("  SKIP: " + $sk.Line.Trim()) -ForegroundColor DarkYellow
 }
 
 # D3D11 side: a scenario with no "# expect:" line is unaffected.
@@ -320,8 +321,8 @@ if ($Scenario -and (Test-Path $scfile)) {
     }
     # "# expect-after: A :: B": some B after the LAST A. What "# expect:" cannot
     # say -- that a thing happened again after a teardown, not only before it.
-    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect-after:\s*(.+?)\s*::\s*(.+)$')) {
-        $a = $m.Matches[0].Groups[1].Value.Trim(); $b = $m.Matches[0].Groups[2].Value.Trim()
+    foreach ($m in (Select-String -Path $scfile -Pattern ('^#\s*expect-after(-vk)?:\s*(.+?)\s*::\s*(.+)$'))) {
+        $a = $m.Matches[0].Groups[2].Value.Trim(); $b = $m.Matches[0].Groups[3].Value.Trim()
         $ia = $txt.LastIndexOf($a)
         if ($ia -lt 0) {
             Write-Host "FAIL: the scenario expects '$b' after '$a', and '$a' is not in the log at all." -ForegroundColor Red

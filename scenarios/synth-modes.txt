@@ -5,11 +5,14 @@
 # engine's one-shot guard was left standing by the teardown and the contract
 # never found a motion source again, while D3D11 was unaffected.
 #
-# DLAA preset first so the depth buffer is back-buffer sized, then the game
-# switches its DLSS off and the contract arms. Each mode change is followed by
+# The game stays at its Quality preset, so the shape it created with differs
+# from the substitute's DLAA: on 2026-09-02 the bridge applied the game's create
+# shape (2227x928 -> 3840x1600 in Baldur's Gate 3) to the substitute's contract,
+# NGX refused three times and the bridge switched itself off for the session.
+# With DLSS off the host renders at output size, as a game does, so the depth
+# buffer is back-buffer sized and the contract can arm. Each mode change is followed by
 # enough frames for two delivered-count lines, which is what the runner needs
 # to see the count still rising after the last runtime teardown.
-preset 5
 frames 120
 dlss off
 frames 1500
