@@ -1,0 +1,11 @@
+# Depth handed to NGX as an R32_SFLOAT colour image, the way RTX Remix does
+# it (dlss5-bridge pull request #21). The mirror used to accept only true
+# depth formats and refused with "the mirror does nothing"; it has to build and
+# deliver here exactly as it does for D32_SFLOAT.
+frames 120
+depthcolor on
+frames 600
+
+# vk-only
+
+# expect: building the D3D12 feature

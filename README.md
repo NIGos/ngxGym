@@ -90,6 +90,7 @@ A scenario is a text file of verbs in `scenarios\`, one per line:
 | `hdr on\|off` | HDR10: `R10G10B10A2`, PQ colour space, the scene PQ-encoded as nits up to 1000, IsHDR set. Off is the default float swapchain |
 | `scrgb on\|off` | scRGB HDR: float swapchain, linear colour space, the scene scaled to 640 nits, IsHDR set. D3D11 host only |
 | `sdr on\|off` | 8-bit SDR: `R8G8B8A8`, sRGB colour space. D3D11 host only |
+| `depthcolor on\|off` | hand NGX the depth as an `R32_SFLOAT` colour image, as RTX Remix does. Vulkan host only |
 | `exposure on\|off` | supply an ExposureTexture |
 | `transpose on\|off` | declare the contract the wrong way round |
 | `stale on\|off` | evaluate with another feature's four scalars |
@@ -105,6 +106,7 @@ Directives in comments:
 | `# cfg-old-file` | leave the settings file unstamped, to test its replacement |
 | `# nofast` | run in full under `-Fast` |
 | `# d3d11-only` | the suite skips the scenario on the Vulkan host |
+| `# vk-only` | the suite skips the scenario on the D3D11 host |
 
 A verb the parser accepts and the executor drops fails the run rather than
 passing it.

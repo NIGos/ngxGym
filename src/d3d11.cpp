@@ -868,6 +868,10 @@ int main(int argc, char **argv)
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             if (!ApplyScrgb(h, st.a != 0)) rc = 4;
             break;
+        case STEP_DEPTHCOLOR:
+            printf("FAIL: depthcolor is not implemented on the D3D11 host\n");
+            rc = 4;
+            break;
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.transpose = st.a != 0;

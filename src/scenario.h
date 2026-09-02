@@ -40,7 +40,7 @@
 enum StepKind
 {
     STEP_FRAMES, STEP_MODE, STEP_RESIZE, STEP_PRESET, STEP_RECREATE,
-    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT, STEP_EXPOSURE, STEP_STALE, STEP_SDR, STEP_SCRGB
+    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT, STEP_EXPOSURE, STEP_STALE, STEP_SDR, STEP_SCRGB, STEP_DEPTHCOLOR
 };
 
 enum Mode { MODE_WINDOWED, MODE_BORDERLESS, MODE_EXCLUSIVE };
@@ -113,6 +113,8 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
             ScenarioAdd(s, STEP_SDR, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "scrgb") == 0 && n >= 2)
             ScenarioAdd(s, STEP_SCRGB, _stricmp(a1, "on") == 0 ? 1 : 0);
+        else if (_stricmp(verb, "depthcolor") == 0 && n >= 2)
+            ScenarioAdd(s, STEP_DEPTHCOLOR, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "transpose") == 0 && n >= 2)
             ScenarioAdd(s, STEP_TRANSPOSE, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "stale") == 0 && n >= 2)
@@ -154,6 +156,7 @@ inline const char *StepName(const Step &s)
     case STEP_HDR:       return s.a ? "hdr on" : "hdr off";
     case STEP_SDR:       return s.a ? "sdr on" : "sdr off";
     case STEP_SCRGB:     return s.a ? "scrgb on" : "scrgb off";
+    case STEP_DEPTHCOLOR: return s.a ? "depthcolor on" : "depthcolor off";
     case STEP_TRANSPOSE: return s.a ? "transpose on" : "transpose off";
     case STEP_STALE:     return s.a ? "stale on" : "stale off";
     case STEP_OMIT:      return "omit";

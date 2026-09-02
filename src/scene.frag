@@ -9,6 +9,9 @@ layout(push_constant) uniform Push {
 layout(location = 0) in  vec2 v_uv;
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec2 o_mv;
+// Depth again, as a colour output: RTX Remix hands NGX its depth in an
+// R32_SFLOAT colour image rather than a depth attachment.
+layout(location = 2) out float o_depthc;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
@@ -33,4 +36,5 @@ void main()
     o_mv = pc.mv_texel;
 
     gl_FragDepth = clamp(0.2 + 0.6 * v_uv.y, 0.0, 1.0);
+    o_depthc = gl_FragDepth;
 }

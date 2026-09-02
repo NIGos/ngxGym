@@ -38,6 +38,7 @@ foreach ($b in $backends) {
     foreach ($s in $scenarios) {
         # "# d3d11-only": a scenario using a verb the Vulkan host does not have.
         if ($b -eq 'vk' -and (Select-String -Path (Join-Path $root "scenarios/$s.txt") -Pattern '^#\s*d3d11-only' -Quiet)) { continue }
+        if ($b -eq 'd3d11' -and (Select-String -Path (Join-Path $root "scenarios/$s.txt") -Pattern '^#\s*vk-only' -Quiet)) { continue }
         $pass = 0; $fail = 0; $why = ''
         for ($i = 0; $i -lt $Repeat; ++$i) {
             $args = @{ Frames = $Frames; Scenario = $s }

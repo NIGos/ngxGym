@@ -92,6 +92,11 @@ struct Host
     VkPipeline       pipe = VK_NULL_HANDLE;
 
     Img color, mv, depth, output;
+    // Depth written a second time, into an R32_SFLOAT colour image, the way RTX
+    // Remix hands it to NGX. Always rendered; handed over instead of the depth
+    // attachment only when depthcolor is on.
+    Img  depthc;
+    bool depth_as_color = false;
     uint32_t out_w = 1920, out_h = 1080, rw = 0, rh = 0;
     int  quality = NVSDK_NGX_PerfQuality_Value_MaxQuality;
 
@@ -240,19 +245,19 @@ static bool BuildPipeline(Host &h)
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     VkPipelineDepthStencilStateCreateInfo ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
     ds.depthTestEnable = VK_TRUE; ds.depthWriteEnable = VK_TRUE; ds.depthCompareOp = VK_COMPARE_OP_ALWAYS;
-    VkPipelineColorBlendAttachmentState cba[2] = {};
-    cba[0].colorWriteMask = 0xF; cba[1].colorWriteMask = 0xF;
+    VkPipelineColorBlendAttachmentState cba[3] = {};
+    cba[0].colorWriteMask = 0xF; cba[1].colorWriteMask = 0xF; cba[2].colorWriteMask = 0xF;
     VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-    cb.attachmentCount = 2; cb.pAttachments = cba;
+    cb.attachmentCount = 3; cb.pAttachments = cba;
     const VkDynamicState dyn[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineDynamicStateCreateInfo dsi = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     dsi.dynamicStateCount = 2; dsi.pDynamicStates = dyn;
 
     // Dynamic rendering: no render pass, no framebuffer, and no object that has to be
     // rebuilt every time the render size changes.
-    const VkFormat colfmt[2] = { h.color.fmt, h.mv.fmt };
+    const VkFormat colfmt[3] = { h.color.fmt, h.mv.fmt, h.depthc.fmt };
     VkPipelineRenderingCreateInfo pri = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
-    pri.colorAttachmentCount = 2; pri.pColorAttachmentFormats = colfmt;
+    pri.colorAttachmentCount = 3; pri.pColorAttachmentFormats = colfmt;
     pri.depthAttachmentFormat = h.depth.fmt;
 
     VkGraphicsPipelineCreateInfo gp = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
@@ -324,6 +329,7 @@ static bool Rebuild(Host &h, const char *why)
                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (!MakeImg(h, &h.color,  h.rw, h.rh, VK_FORMAT_R16G16B16A16_SFLOAT, cu, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
     if (!MakeImg(h, &h.mv,     h.rw, h.rh, VK_FORMAT_R16G16_SFLOAT,       cu, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
+    if (!MakeImg(h, &h.depthc, h.rw, h.rh, VK_FORMAT_R32_SFLOAT,          cu, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
     if (!MakeImg(h, &h.depth,  h.rw, h.rh, VK_FORMAT_D32_SFLOAT,
                  VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_DEPTH_BIT)) return false;
@@ -347,6 +353,7 @@ static bool Rebuild(Host &h, const char *why)
     Barrier(cmd, h.mv.img,     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     Barrier(cmd, h.output.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     Barrier(cmd, h.depth.img,  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+    Barrier(cmd, h.depthc.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_COLOR_BIT);
     if (expo_new) Barrier(cmd, h.expo.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     if (!Flush(h, cmd)) return false;
 
@@ -416,11 +423,12 @@ static bool RenderFrame(Host &h)
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(h.cmd, &bi);
 
-    VkRenderingAttachmentInfo ca[2] = {};
+    VkRenderingAttachmentInfo ca[3] = {};
     ca[0] = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     ca[0].imageView = h.color.view; ca[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     ca[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; ca[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     ca[1] = ca[0]; ca[1].imageView = h.mv.view;
+    ca[2] = ca[0]; ca[2].imageView = h.depthc.view;
     VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     da.imageView = h.depth.view; da.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -428,7 +436,7 @@ static bool RenderFrame(Host &h)
 
     VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
     ri.renderArea = { { 0, 0 }, { h.rw, h.rh } };
-    ri.layerCount = 1; ri.colorAttachmentCount = 2; ri.pColorAttachments = ca;
+    ri.layerCount = 1; ri.colorAttachmentCount = 3; ri.pColorAttachments = ca;
     ri.pDepthAttachment = &da;
 
     vkCmdBeginRendering(h.cmd, &ri);
@@ -486,7 +494,7 @@ static bool RenderFrame(Host &h)
 
         NVSDK_NGX_Resource_VK rc = AsResource(h.color, false);
         NVSDK_NGX_Resource_VK ro = AsResource(h.output, true);
-        NVSDK_NGX_Resource_VK rd = AsResource(h.depth, false);
+        NVSDK_NGX_Resource_VK rd = AsResource(h.depth_as_color ? h.depthc : h.depth, false);
         NVSDK_NGX_Resource_VK rm = AsResource(h.mv, false);
         h.p->Set(NVSDK_NGX_Parameter_Color,         &rc);
         h.p->Set(NVSDK_NGX_Parameter_Output,        &ro);
@@ -1104,6 +1112,13 @@ int main(int argc, char **argv)
             printf("FAIL: scrgb is not implemented on the Vulkan host\n");
             rc = 4;
             break;
+        case STEP_DEPTHCOLOR:
+            // Which image NGX is handed as Depth. The feature is rebuilt so the
+            // bridge sees the change at a create, as a game switching would.
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            h.depth_as_color = st.a != 0;
+            if (!Rebuild(h, st.a ? "depthcolor on" : "depthcolor off")) rc = 4;
+            break;
         case STEP_EXPOSURE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.exposure_on = st.a != 0;
@@ -1125,7 +1140,7 @@ int main(int argc, char **argv)
     if (h.pipe) vkDestroyPipeline(h.dev, h.pipe, nullptr);
     if (h.play) vkDestroyPipelineLayout(h.dev, h.play, nullptr);
     DestroyImg(h.dev, &h.color); DestroyImg(h.dev, &h.mv);
-    DestroyImg(h.dev, &h.depth); DestroyImg(h.dev, &h.output);
+    DestroyImg(h.dev, &h.depth); DestroyImg(h.dev, &h.depthc); DestroyImg(h.dev, &h.output);
     DestroyImg(h.dev, &h.expo);
     if (h.fence) vkDestroyFence(h.dev, h.fence, nullptr);
     for (VkSemaphore s2 : h.rendered) if (s2) vkDestroySemaphore(h.dev, s2, nullptr);
