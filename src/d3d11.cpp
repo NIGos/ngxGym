@@ -606,6 +606,42 @@ static void ShowHostWindow(HWND w)
            "Exclusive fullscreen is refused in this mode.\n");
 }
 
+
+// What the driver put into this process, and what the swapchain says it
+// presented. Printed at the end of every run so a driver-side feature that has
+// no API of its own -- Smooth Motion is one -- can be told apart by what it
+// changes: the NVIDIA modules loaded, and the present statistics. Compare a run
+// with the feature on against one with it off; the line that differs is the
+// detector, and there is none until that comparison has been made.
+typedef BOOL (WINAPI *PFN_EnumProcessModules)(HANDLE, HMODULE *, DWORD, DWORD *);
+typedef DWORD (WINAPI *PFN_GetModuleFileNameExA)(HANDLE, HMODULE, LPSTR, DWORD);
+static void PrintNvModules()
+{
+    HMODULE k32 = GetModuleHandleA("kernel32.dll");
+    PFN_EnumProcessModules   enumMods = reinterpret_cast<PFN_EnumProcessModules>(GetProcAddress(k32, "K32EnumProcessModules"));
+    PFN_GetModuleFileNameExA nameOf   = reinterpret_cast<PFN_GetModuleFileNameExA>(GetProcAddress(k32, "K32GetModuleFileNameExA"));
+    if (enumMods == nullptr || nameOf == nullptr) { printf("modules: unavailable\n"); return; }
+    HMODULE mods[1024]; DWORD bytes = 0;
+    if (!enumMods(GetCurrentProcess(), mods, sizeof(mods), &bytes)) { printf("modules: enumeration failed\n"); return; }
+    const DWORD n = bytes / sizeof(HMODULE);
+    printf("nvidia modules in this process (%lu modules total):\n", static_cast<unsigned long>(n));
+    for (DWORD i = 0; i < n && i < 1024; ++i)
+    {
+        char path[MAX_PATH]; if (nameOf(GetCurrentProcess(), mods[i], path, MAX_PATH) == 0) continue;
+        const char *leaf = strrchr(path, '\\'); leaf = leaf ? leaf + 1 : path;
+        if (_strnicmp(leaf, "nv", 2) == 0 || _strnicmp(leaf, "_nv", 3) == 0) printf("  %s\n", path);
+    }
+}
+
+static void PrintPresentStats(IDXGISwapChain1 *sc)
+{
+    DXGI_FRAME_STATISTICS st = {};
+    const HRESULT hr = sc != nullptr ? sc->GetFrameStatistics(&st) : E_POINTER;
+    if (FAILED(hr)) { printf("present statistics: unavailable (0x%08X)\n", static_cast<unsigned>(hr)); return; }
+    printf("present statistics: PresentCount %u  PresentRefreshCount %u  SyncRefreshCount %u\n",
+           st.PresentCount, st.PresentRefreshCount, st.SyncRefreshCount);
+}
+
 int main(int argc, char **argv)
 {
     // Unbuffered, always. When the runner redirects stdout to a file it becomes
@@ -804,6 +840,8 @@ int main(int argc, char **argv)
 
     if (h.frame < want_frames)
     { printf("FAIL: ran %d of %d frames the scenario asked for\n", h.frame, want_frames); return 6; }
+    PrintNvModules();
+    PrintPresentStats(h.sc);
     if (rc != 0) { printf("FAIL: scenario stopped\n"); return rc; }
     if (h.evaluated > 0 && h.delivered == 0) { printf("FAIL: no evaluate succeeded\n"); return 4; }
     printf("ok\n");
