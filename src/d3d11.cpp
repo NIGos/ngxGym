@@ -248,17 +248,10 @@ static bool Rebuild(Host &h, const char *why)
                                       static_cast<NVSDK_NGX_PerfQuality_Value>(h.quality),
                                       &h.rw, &h.rh, &maxw, &maxh, &minw, &minh, &sharp);
     }
-    else
-    {
-        // nodlss: NGX was never initialised, so the render size comes from the
-        // published DLSS ratios instead of from the snippet. MaxPerf, Balanced,
-        // MaxQuality, UltraPerformance, UltraQuality, DLAA, in NGX's own order.
-        static const float kRatio[6] = { 0.5f, 0.58f, 0.6667f, 0.3333f, 0.77f, 1.0f };
-        const float r = (h.quality >= 0 && h.quality < 6) ? kRatio[h.quality] : 1.0f;
-        h.rw = static_cast<UINT>(h.out_w * r + 0.5f);
-        h.rh = static_cast<UINT>(h.out_h * r + 0.5f);
-    }
-    if (h.rw == 0 || h.rh == 0) { h.rw = h.out_w; h.rh = h.out_h; }
+    // A preset the snippet does not offer comes back 0x0, and the host used to
+    // run at the output size under the asked-for PerfQualityValue in silence.
+    if (h.dlss_on && (h.rw == 0 || h.rh == 0))
+    { printf("FAIL: no optimal settings for preset %d\n", h.quality); return false; }
     // With its DLSS off a game renders at the output size, and its depth buffer
     // is the back buffer's size -- which is the one precondition the substitute
     // contract has. Rendering at the DLSS size with DLSS off is what no game
@@ -652,7 +645,9 @@ static bool RenderFrame(Host &h)
         }
         bb->Release();
     }
-    h.sc->Present(0, 0);
+    const HRESULT phr = h.sc->Present(0, 0);
+    if (phr == DXGI_ERROR_DEVICE_REMOVED || phr == DXGI_ERROR_DEVICE_RESET)
+    { printf("FAIL: Present -> 0x%08lX, device removed (reason 0x%08lX)\n", phr, h.dev->GetDeviceRemovedReason()); return false; }
     ++h.frame;
 
     MSG msg;
@@ -754,7 +749,9 @@ int main(int argc, char **argv)
     else
     {
         // No scenario file: the smoke test, so a bare run still does something.
-        ScenarioAdd(&sc, STEP_FRAMES, argc > 1 ? atoi(argv[1]) : 600);
+        int nf = 600;
+        if (argc > 1 && (!Num(argv[1], &nf) || nf <= 0)) { printf("FAIL: '%s' is neither a scenario file nor a frame count\n", argv[1]); return 2; }
+        ScenarioAdd(&sc, STEP_FRAMES, nf);
         strncpy_s(sc.name, "smoke", _TRUNCATE);
     }
     printf("ngxGym: scenario '%s', %d steps\n", sc.name, sc.count);
@@ -919,8 +916,14 @@ int main(int argc, char **argv)
             break;
         case STEP_OMIT:
             printf("[%d/%d] omit %d\n", s + 1, sc.count, st.a);
-            h.omit = static_cast<Omit>(st.a);
-            if (st.a == OMIT_FLAGS && !Rebuild(h, "omit flags")) rc = 4;
+            {
+                const bool was = h.omit == OMIT_FLAGS;
+                h.omit = static_cast<Omit>(st.a);
+                // Into or out of "omit flags": the create block changes either
+                // way. Leaving it used to keep the flagless feature for the
+                // control segments that followed.
+                if (was != (st.a == OMIT_FLAGS) && !Rebuild(h, was ? "omit ends" : "omit flags")) rc = 4;
+            }
             break;
         case STEP_EXPOSURE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
@@ -944,7 +947,7 @@ int main(int argc, char **argv)
 
     ReleaseFeat(h);
     if (h.p) NVSDK_NGX_D3D11_DestroyParameters(h.p);
-    NVSDK_NGX_D3D11_Shutdown1(h.dev);
+    if (h.caps) NVSDK_NGX_D3D11_Shutdown1(h.dev);
     if (h.dss) h.dss->Release(); if (h.cb) h.cb->Release();
     if (h.vs) h.vs->Release();   if (h.ps) h.ps->Release();
     if (vsb) vsb->Release();     if (psb) psb->Release();

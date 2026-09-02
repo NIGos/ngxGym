@@ -4,8 +4,11 @@
 # deliver here exactly as it does for D32_SFLOAT.
 frames 120
 depthcolor on
-frames 600
+frames 900
 
 # vk-only
 
-# expect: the game replaced its own feature
+# nofast
+# Delivery after the switch, not only a rebuild: the count line every 600
+# delivered frames has to appear after the create the switch caused.
+# expect-after: the game replaced its own feature :: frames delivered so far

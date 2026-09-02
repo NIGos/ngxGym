@@ -62,6 +62,25 @@ struct Scenario
     bool nodlss = false;
 };
 
+// "on" or "off" and nothing else. "onn" used to read as off, and the
+// misbehaviour the line asked for was never applied while the run went green.
+inline bool OnOff(const char *w, int *out)
+{
+    if (_stricmp(w, "on") == 0)  { *out = 1; return true; }
+    if (_stricmp(w, "off") == 0) { *out = 0; return true; }
+    return false;
+}
+
+// A whole number and nothing else. atoi read "3OO" as 0 frames.
+inline bool Num(const char *w, int *out)
+{
+    char *end = nullptr;
+    const long v = strtol(w, &end, 10);
+    if (end == w || *end != 0) return false;
+    *out = static_cast<int>(v);
+    return true;
+}
+
 inline bool ScenarioAdd(Scenario *s, StepKind k, int a = 0, int b = 0)
 {
     if (s->count >= 64) return false;
@@ -91,43 +110,46 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
         const int n = sscanf_s(line, "%31s %31s %31s %31s", verb, static_cast<unsigned>(sizeof(verb)), a1, static_cast<unsigned>(sizeof(a1)), a2, static_cast<unsigned>(sizeof(a2)), a3, static_cast<unsigned>(sizeof(a3)));
         if (n < 1 || verb[0] == '#') continue;
 
-        if      (_stricmp(verb, "frames")   == 0 && n >= 2) ScenarioAdd(s, STEP_FRAMES, atoi(a1));
-        else if (_stricmp(verb, "resize")   == 0 && n >= 3) ScenarioAdd(s, STEP_RESIZE, atoi(a1), atoi(a2));
-        else if (_stricmp(verb, "preset")   == 0 && n >= 2) ScenarioAdd(s, STEP_PRESET, atoi(a1));
+        int v = 0, w = 0;
+        bool bad = false;
+        if      (_stricmp(verb, "frames")   == 0 && n >= 2) { if (Num(a1, &v) && v > 0) ScenarioAdd(s, STEP_FRAMES, v); else bad = true; }
+        else if (_stricmp(verb, "resize")   == 0 && n >= 3) { if (Num(a1, &v) && Num(a2, &w) && v > 0 && w > 0) ScenarioAdd(s, STEP_RESIZE, v, w); else bad = true; }
+        else if (_stricmp(verb, "preset")   == 0 && n >= 2) { if (Num(a1, &v) && v >= 0 && v <= 5) ScenarioAdd(s, STEP_PRESET, v); else bad = true; }
         else if (_stricmp(verb, "recreate") == 0)           ScenarioAdd(s, STEP_RECREATE);
         else if (_stricmp(verb, "mode")     == 0 && n >= 2)
         {
             if      (_stricmp(a1, "windowed")   == 0) ScenarioAdd(s, STEP_MODE, MODE_WINDOWED);
             else if (_stricmp(a1, "borderless") == 0) ScenarioAdd(s, STEP_MODE, MODE_BORDERLESS);
             else if (_stricmp(a1, "exclusive")  == 0) ScenarioAdd(s, STEP_MODE, MODE_EXCLUSIVE);
-            else { printf("scenario %s:%d: unknown mode '%s'\n", path, no, a1); ok = false; }
+            else bad = true;
         }
-        else if (_stricmp(verb, "dlss") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_DLSS, _stricmp(a1, "on") == 0 ? 1 : 0);
-        else if (_stricmp(verb, "hdr") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_HDR, _stricmp(a1, "on") == 0 ? 1 : 0);
-        else if (_stricmp(verb, "sdr") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_SDR, _stricmp(a1, "on") == 0 ? 1 : 0);
-        else if (_stricmp(verb, "scrgb") == 0 && n >= 2)
-            // Optional peak in nits for the scene's brightest pixel; 640 by default.
-            // b carries the peak in nits, and a fourth word "g22" asks for the
-            // gamma-2.2 colour space instead of linear, which a game that never
+        else if (_stricmp(verb, "dlss")       == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_DLSS, v); else bad = true; }
+        else if (_stricmp(verb, "hdr")        == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_HDR, v); else bad = true; }
+        else if (_stricmp(verb, "sdr")        == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_SDR, v); else bad = true; }
+        else if (_stricmp(verb, "scrgb")      == 0 && n >= 2)
+        {
+            // Optional peak in nits for the scene's brightest pixel, 640 by
+            // default, and an optional "g22" in either position asking for the
+            // gamma-2.2 colour space instead of linear -- what a game that never
             // calls SetColorSpace1 leaves on a float swapchain. Encoded as a
             // negative peak, since Step has two fields.
-            ScenarioAdd(s, STEP_SCRGB, _stricmp(a1, "on") == 0 ? 1 : 0,
-                        (n >= 3 ? atoi(a2) : 640) * ((n >= 4 && _stricmp(a3, "g22") == 0) ? -1 : 1));
-        else if (_stricmp(verb, "depthcolor") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_DEPTHCOLOR, _stricmp(a1, "on") == 0 ? 1 : 0);
-        else if (_stricmp(verb, "pad") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_PAD, atoi(a1));
-        else if (_stricmp(verb, "transpose") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_TRANSPOSE, _stricmp(a1, "on") == 0 ? 1 : 0);
-        else if (_stricmp(verb, "stale") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_STALE, _stricmp(a1, "on") == 0 ? 1 : 0);
-        else if (_stricmp(verb, "nodlss") == 0)
-            s->nodlss = true;
-        else if (_stricmp(verb, "exposure") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_EXPOSURE, _stricmp(a1, "on") == 0 ? 1 : 0);
+            int nits = 640, g22 = 1;
+            if (!OnOff(a1, &v)) bad = true;
+            const char *xs[2] = { a2, a3 };
+            for (const char *x : xs)
+            {
+                if (x[0] == 0) continue;
+                if (_stricmp(x, "g22") == 0) g22 = -1;
+                else if (!Num(x, &nits) || nits <= 0) bad = true;
+            }
+            if (!bad) ScenarioAdd(s, STEP_SCRGB, v, nits * g22);
+        }
+        else if (_stricmp(verb, "depthcolor") == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_DEPTHCOLOR, v); else bad = true; }
+        else if (_stricmp(verb, "pad")        == 0 && n >= 2) { if (Num(a1, &v) && v >= 0) ScenarioAdd(s, STEP_PAD, v); else bad = true; }
+        else if (_stricmp(verb, "transpose")  == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_TRANSPOSE, v); else bad = true; }
+        else if (_stricmp(verb, "stale")      == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_STALE, v); else bad = true; }
+        else if (_stricmp(verb, "nodlss")     == 0)           s->nodlss = true;
+        else if (_stricmp(verb, "exposure")   == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_EXPOSURE, v); else bad = true; }
         else if (_stricmp(verb, "omit") == 0 && n >= 2)
         {
             if      (_stricmp(a1, "mvscale") == 0) ScenarioAdd(s, STEP_OMIT, OMIT_MVSCALE);
@@ -135,11 +157,17 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
             else if (_stricmp(a1, "jitter")  == 0) ScenarioAdd(s, STEP_OMIT, OMIT_JITTER);
             else if (_stricmp(a1, "quality") == 0) ScenarioAdd(s, STEP_OMIT, OMIT_QUALITY);
             else if (_stricmp(a1, "none")    == 0) ScenarioAdd(s, STEP_OMIT, OMIT_NONE);
-            else { printf("scenario %s:%d: unknown omit '%s'\n", path, no, a1); ok = false; }
+            else bad = true;
         }
-        else { printf("scenario %s:%d: unknown verb '%s'\n", path, no, verb); ok = false; }
+        else bad = true;
+        if (bad) { printf("scenario %s:%d: cannot read '%s %s %s %s'\n", path, no, verb, a1, a2, a3); ok = false; }
+        if (s->count >= 64) { printf("scenario %s:%d: more than 64 steps\n", path, no); ok = false; break; }
     }
     fclose(f);
+    if (s->nodlss)
+        for (int i = 0; i < s->count; ++i)
+            if (s->steps[i].kind == STEP_DLSS && s->steps[i].a != 0)
+            { printf("scenario %s: 'dlss on' with 'nodlss', and the host has no NGX to switch on\n", path); ok = false; }
 
     const char *leaf = strrchr(path, '\\');
     leaf = leaf ? leaf + 1 : path;

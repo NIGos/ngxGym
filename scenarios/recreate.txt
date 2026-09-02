@@ -10,4 +10,6 @@ recreate
 frames 300
 
 # expect-after-d3d11: the game created its feature again :: rebuilding: render
-# expect-vk: the game replaced its own feature
+# The fourth create is the unchanged-shape one (start, preset 1, preset 2,
+# recreate), so the build after it is the build that step caused.
+# expect-after-vk: Vulkan CreateFeature #4 returned :: building the D3D12 feature

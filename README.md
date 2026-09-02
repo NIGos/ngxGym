@@ -103,7 +103,7 @@ Directives in comments:
 | --- | --- |
 | `# expect: text` | the add-on's log must contain it. `# expect-d3d11:` and `# expect-vk:` for one backend |
 | `# expect-after: A :: B` | some B after the last A. `# expect-after-d3d11:` and `# expect-after-vk:` for one backend |
-| `# host-may-fail` | the host's own NGX evaluates may fail without failing the run; `-d3d11` / `-vk` for one backend |
+| `# host-may-fail` | the host's own NGX evaluates may fail without failing the run; `-d3d11` / `-vk` for one backend. Alone on its line |
 | `# cfg: key=value` | appended to the generated `dlss5-bridge.cfg` |
 | `# cfg-old-file` | leave the settings file unstamped, to test its replacement |
 | `# nofast` | run in full under `-Fast` |

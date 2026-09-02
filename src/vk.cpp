@@ -318,10 +318,12 @@ static bool Rebuild(Host &h, const char *why)
 
     unsigned int maxw = 0, maxh = 0, minw = 0, minh = 0;
     float sharp = 0.0f;
-    NGX_DLSS_GET_OPTIMAL_SETTINGS(h.caps, h.out_w, h.out_h,
-                                  static_cast<NVSDK_NGX_PerfQuality_Value>(h.quality),
-                                  &h.rw, &h.rh, &maxw, &maxh, &minw, &minh, &sharp);
-    if (h.rw == 0 || h.rh == 0) { h.rw = h.out_w; h.rh = h.out_h; }
+    if (h.caps != nullptr)
+        NGX_DLSS_GET_OPTIMAL_SETTINGS(h.caps, h.out_w, h.out_h,
+                                      static_cast<NVSDK_NGX_PerfQuality_Value>(h.quality),
+                                      &h.rw, &h.rh, &maxw, &maxh, &minw, &minh, &sharp);
+    if (h.dlss_on && (h.rw == 0 || h.rh == 0))
+    { printf("FAIL: no optimal settings for preset %d\n", h.quality); return false; }
     // With its DLSS off a game renders at the output size; see the D3D11 host.
     if (!h.dlss_on) { h.rw = h.out_w; h.rh = h.out_h; }
     printf("  rebuild (%s): %ux%u -> %ux%u, quality %d\n", why, h.rw, h.rh, h.out_w, h.out_h, h.quality);
@@ -356,7 +358,14 @@ static bool Rebuild(Host &h, const char *why)
     Barrier(cmd, h.output.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     Barrier(cmd, h.depth.img,  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     Barrier(cmd, h.depthc.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_COLOR_BIT);
-    if (expo_new) Barrier(cmd, h.expo.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    if (expo_new)
+    {
+        Barrier(cmd, h.expo.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        // A value, not whatever the allocation held: the add-on reads it back.
+        VkClearColorValue one = {}; one.float32[0] = 1.0f;
+        const VkImageSubresourceRange all = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdClearColorImage(cmd, h.expo.img, VK_IMAGE_LAYOUT_GENERAL, &one, 1, &all);
+    }
     if (!Flush(h, cmd)) return false;
 
     if (h.pipe != VK_NULL_HANDLE) { vkDestroyPipeline(h.dev, h.pipe, nullptr); h.pipe = VK_NULL_HANDLE; }
@@ -398,7 +407,8 @@ static bool RenderFrame(Host &h)
     const float jy = Halton((h.frame % 32) + 1, 3) - 0.5f;
     const float mvsx = -static_cast<float>(h.rw), mvsy = -static_cast<float>(h.rh);
 
-    vkWaitForFences(h.dev, 1, &h.fence, VK_TRUE, UINT64_MAX);
+    const VkResult fr = vkWaitForFences(h.dev, 1, &h.fence, VK_TRUE, 5000000000ull);
+    if (fr != VK_SUCCESS) { printf("FAIL: vkWaitForFences -> %d after 5 s\n", static_cast<int>(fr)); return false; }
 
     uint32_t idx = 0;
     const VkSemaphore acq = h.acquired[h.sem_i];
@@ -461,6 +471,12 @@ static bool RenderFrame(Host &h)
     // Nine draws, not one: see the D3D11 host's draw loop for why.
     for (int i = 0; i < 9; ++i) vkCmdDraw(h.cmd, 3, 1, 0, 0);
     vkCmdEndRendering(h.cmd);
+    // What the scene wrote, made visible to whatever reads it next -- NGX, the
+    // add-on's mirror, or the blit. The layouts stay GENERAL; this is visibility.
+    Barrier(h.cmd, h.color.img,  VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+    Barrier(h.cmd, h.mv.img,     VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+    Barrier(h.cmd, h.depth.img,  VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+    Barrier(h.cmd, h.depthc.img, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
 
     if (h.dlss_on && h.feat != nullptr)
     {
@@ -532,14 +548,18 @@ static bool RenderFrame(Host &h)
             printf("  EvaluateFeature frame %d -> 0x%08X\n", h.frame, r);
     }
 
-    // Present the upscaled output.
+    // Present the upscaled output -- or the scene itself with DLSS off, as a
+    // game does. The output image is written by nobody then, and presenting it
+    // showed a frozen picture the whole segment.
+    const Img &shown = (h.dlss_on && h.feat != nullptr) ? h.output : h.color;
+    Barrier(h.cmd, shown.img, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
     Barrier(h.cmd, h.swap_imgs[idx], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkImageBlit blit = {};
     blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     blit.dstSubresource = blit.srcSubresource;
-    blit.srcOffsets[1] = { static_cast<int32_t>(h.output.w), static_cast<int32_t>(h.output.h), 1 };
+    blit.srcOffsets[1] = { static_cast<int32_t>(shown.w), static_cast<int32_t>(shown.h), 1 };
     blit.dstOffsets[1] = { static_cast<int32_t>(h.swap_ext.width), static_cast<int32_t>(h.swap_ext.height), 1 };
-    vkCmdBlitImage(h.cmd, h.output.img, VK_IMAGE_LAYOUT_GENERAL,
+    vkCmdBlitImage(h.cmd, shown.img, VK_IMAGE_LAYOUT_GENERAL,
                    h.swap_imgs[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
     Barrier(h.cmd, h.swap_imgs[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     vkEndCommandBuffer(h.cmd);
@@ -549,12 +569,14 @@ static bool RenderFrame(Host &h)
     si.waitSemaphoreCount = 1; si.pWaitSemaphores = &acq; si.pWaitDstStageMask = &wait;
     si.commandBufferCount = 1; si.pCommandBuffers = &h.cmd;
     si.signalSemaphoreCount = 1; si.pSignalSemaphores = &h.rendered[idx];
-    vkQueueSubmit(h.queue, 1, &si, h.fence);
+    const VkResult sr = vkQueueSubmit(h.queue, 1, &si, h.fence);
+    if (sr != VK_SUCCESS) { printf("FAIL: vkQueueSubmit -> %d\n", static_cast<int>(sr)); return false; }
 
     VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     pi.waitSemaphoreCount = 1; pi.pWaitSemaphores = &h.rendered[idx];
     pi.swapchainCount = 1; pi.pSwapchains = &h.swap; pi.pImageIndices = &idx;
-    vkQueuePresentKHR(h.queue, &pi);
+    const VkResult pr = vkQueuePresentKHR(h.queue, &pi);
+    if (pr < 0 && pr != VK_ERROR_OUT_OF_DATE_KHR) { printf("FAIL: vkQueuePresentKHR -> %d\n", static_cast<int>(pr)); return false; }
     ++h.frame;
 
     MSG msg;
@@ -918,6 +940,8 @@ static bool Setup(Host &h)
     fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     VKC(vkCreateFence(h.dev, &fci, nullptr, &h.fence), "vkCreateFence");
 
+    if (!h.dlss_on) { printf("nodlss: NGX is not initialised, as in a game without DLSS\n"); return true; }
+
     wchar_t here[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, here, MAX_PATH);
     if (wchar_t *s = wcsrchr(here, L'\\')) *(s + 1) = 0;
@@ -931,7 +955,7 @@ static bool Setup(Host &h)
         here, h.inst, h.phys, h.dev, vkGetInstanceProcAddr, vkGetDeviceProcAddr,
         &ci, NVSDK_NGX_Version_API);
     printf("VULKAN_Init_with_ProjectID -> 0x%08X\n", nr);
-    if (NVSDK_NGX_FAILED(nr)) return false;
+    if (NVSDK_NGX_FAILED(nr)) { printf("FAIL: NGX init\n"); return false; }
 
     if (NVSDK_NGX_FAILED(NVSDK_NGX_VULKAN_GetCapabilityParameters(&h.caps)) || !h.caps)
     { printf("FAIL: GetCapabilityParameters\n"); return false; }
@@ -1017,7 +1041,9 @@ int main(int argc, char **argv)
     { if (!ScenarioLoad(&sc, argv[1])) { printf("FAIL: scenario\n"); return 2; } }
     else
     {
-        ScenarioAdd(&sc, STEP_FRAMES, argc > 1 ? atoi(argv[1]) : 600);
+        int nf = 600;
+        if (argc > 1 && (!Num(argv[1], &nf) || nf <= 0)) { printf("FAIL: '%s' is neither a scenario file nor a frame count\n", argv[1]); return 2; }
+        ScenarioAdd(&sc, STEP_FRAMES, nf);
         strncpy_s(sc.name, "smoke", _TRUNCATE);
     }
     printf("ngxGym-vk: scenario '%s', %d steps\n", sc.name, sc.count);
@@ -1035,8 +1061,8 @@ int main(int argc, char **argv)
     if (h.hwnd == nullptr) { printf("FAIL: no window\n"); return 2; }
     ShowHostWindow(h.hwnd);
 
-    if (!Setup(h)) return 3;
     h.dlss_on = !sc.nodlss;
+    if (!Setup(h)) return 3;
     if (!Rebuild(h, "start")) return 3;
 
     // How many frames the scenario asks for, so a run that ends early is a failure
@@ -1078,8 +1104,11 @@ int main(int argc, char **argv)
             break;
         case STEP_OMIT:
             printf("[%d/%d] omit %d\n", s + 1, sc.count, st.a);
-            h.omit = static_cast<Omit>(st.a);
-            if (st.a == OMIT_FLAGS && !Rebuild(h, "omit flags")) rc = 4;
+            {
+                const bool was = h.omit == OMIT_FLAGS;
+                h.omit = static_cast<Omit>(st.a);
+                if (was != (st.a == OMIT_FLAGS) && !Rebuild(h, was ? "omit ends" : "omit flags")) rc = 4;
+            }
             break;
         // Not yet on this half, and said so rather than silently ignored: a verb the
         // parser accepts and the executor drops is a run that proves something other
@@ -1141,7 +1170,7 @@ int main(int argc, char **argv)
     vkDeviceWaitIdle(h.dev);
     ReleaseFeat(h);
     if (h.p) NVSDK_NGX_VULKAN_DestroyParameters(h.p);
-    NVSDK_NGX_VULKAN_Shutdown1(h.dev);
+    if (h.caps) NVSDK_NGX_VULKAN_Shutdown1(h.dev);
     if (h.pipe) vkDestroyPipeline(h.dev, h.pipe, nullptr);
     if (h.play) vkDestroyPipelineLayout(h.dev, h.play, nullptr);
     DestroyImg(h.dev, &h.color); DestroyImg(h.dev, &h.mv);

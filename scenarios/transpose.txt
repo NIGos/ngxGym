@@ -11,4 +11,6 @@ frames 300
 # Both backends now read the shape from the game's create rather than repairing
 # the evaluate's scalars; the swap repair stays underneath for a create that was
 # never seen.
+# nofast
 # expect: The create is used
+# expect-after: The create is used :: frames delivered so far

@@ -10,7 +10,7 @@ frames 600
 dlss off
 frames 900
 dlss on
-frames 600
+frames 900
 
 # The substitute contract is off by default as of 1.4.0 -- it is a real DLSS
 # feature fed approximated inputs and it shows -- and the source-latch release
@@ -25,3 +25,7 @@ frames 600
 # cfg: synth=1
 
 # expect: The source latch is released
+# And the mirror comes back after it: deliveries resume, and on Vulkan the
+# D3D12 feature is built again.
+# expect-after: The source latch is released :: frames delivered so far
+# expect-after-vk: The source latch is released :: building the D3D12 feature

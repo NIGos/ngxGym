@@ -49,7 +49,7 @@ foreach ($b in $backends) {
             # $LASTEXITCODE would still hold the previous runner's 0. Preset it, and
             # treat an exception as the failure it is.
             $global:LASTEXITCODE = -1
-            try { $out = & $runner @args 2>&1 } catch { $out = "runner error: $_"; $global:LASTEXITCODE = -1 }
+            try { $out = & $runner @args *>&1 } catch { $out = "runner error: $_"; $global:LASTEXITCODE = -1 }
             if ($LASTEXITCODE -eq 0) { $pass++ }
             else {
                 $fail++
@@ -59,6 +59,8 @@ foreach ($b in $backends) {
                 }
             }
         }
+        # A step the host refused is not a failure, and it is not nothing either.
+        if ($fail -eq 0) { $nskip = @($out | Select-String 'SKIP:').Count; if ($nskip -gt 0) { $why = "$nskip step(s) skipped" } }
         $rows += [pscustomobject]@{ Backend = $b; Scenario = $s; Pass = $pass; Fail = $fail; Why = $why }
         $tag = $fail -eq 0 ? 'ok  ' : 'FAIL'
         $colour = $fail -eq 0 ? 'Green' : 'Red'
@@ -77,23 +79,30 @@ if ($Only -ne 'vk') {
     Write-Host ''
     Write-Host 'consumer check: does the DLSS 5 add-on change the picture?'
     $hashes = @{}
-    foreach ($with in @($true, $false)) {
+    # Three legs: without, without again, with. Two without-consumer hashes that
+    # differ mean the instrument is not stable and "different" proves nothing.
+    foreach ($with in @($false, 'again', $true)) {
         $a = @{ Scenario = 'consumer'; Frames = $Frames }
         if ($Background) { $a['Background'] = $true }
-        if (-not $with) { $a['NoConsumer'] = $true }
+        if ($with -ne $true) { $a['NoConsumer'] = $true }
         $global:LASTEXITCODE = -1
-        try { & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null } catch { $global:LASTEXITCODE = -1 }
-        if ($LASTEXITCODE -ne 0) { Write-Host ("  FAIL: the {0} run exited {1}." -f ($with ? 'with-consumer' : 'without-consumer'), $LASTEXITCODE) -ForegroundColor Red; $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why="runner exit $LASTEXITCODE" }; $hashes = $null; break }
-        if ($with -and -not (Select-String -Path (Join-Path $root 'run/consumer/ReShade.log') -Pattern 'DLSS5 Generic' -Quiet)) { Write-Host '  FAIL: the with-consumer run has no DLSS 5 add-on in it.' -ForegroundColor Red; $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='consumer not staged' }; $hashes = $null; break }
+        try { & (Join-Path $root 'run.ps1') @a *>&1 | Out-Null } catch { $global:LASTEXITCODE = -1 }
+        if ($LASTEXITCODE -ne 0) { Write-Host ("  FAIL: the {0} run exited {1}." -f ($with -eq $true ? 'with-consumer' : 'without-consumer'), $LASTEXITCODE) -ForegroundColor Red; $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why="runner exit $LASTEXITCODE" }; $hashes = $null; break }
+        $rsl = Join-Path $root 'run/consumer/ReShade.log'
+        if ($with -eq $true -and -not ((Test-Path $rsl) -and (Select-String -Path $rsl -Pattern 'DLSS5 Generic' -Quiet))) { Write-Host '  FAIL: the with-consumer run has no DLSS 5 add-on in it.' -ForegroundColor Red; $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='consumer not staged' }; $hashes = $null; break }
         # Read from the LOG, not from the runner's output. Write-Host does not
         # go down the pipeline, and capturing it is how this check silently
         # compared two empty strings the first time it ran.
         $cl = Join-Path $root 'run/consumer/dlss5-bridge.log'
         $line = if (Test-Path $cl) { Select-String -Path $cl -Pattern 'output hash after evaluate' | Select-Object -First 1 } else { $null }
         $hashes[$with] = if ($line) { [regex]::Match($line.ToString(), '([0-9A-F]{16})').Groups[1].Value } else { '' }
-        Write-Host ('  {0,-14} {1}' -f ($with ? 'with consumer' : 'without'), $hashes[$with])
+        Write-Host ('  {0,-14} {1}' -f ($with -eq $true ? 'with consumer' : 'without'), $hashes[$with])
     }
     if ($null -eq $hashes) { }
+    elseif ($hashes[$false] -ne $hashes['again']) {
+        Write-Host '  FAIL: two runs without the consumer gave different hashes, so the instrument is not stable and no comparison is possible.' -ForegroundColor Red
+        $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='hash unstable' }
+    }
     elseif (-not $hashes[$true] -or -not $hashes[$false]) {
         Write-Host '  FAIL: no output hash. The scenario must carry # cfg: hash_out=1.' -ForegroundColor Red
         $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=0; Fail=1; Why='no hash' }
@@ -116,14 +125,16 @@ if ($Only -ne 'vk') {
     Write-Host ''
     Write-Host 'brightness check: does the DLSS 5 add-on keep the picture at its brightness?'
     $means = @{}
+    $bwhy = 'brightness moved'
     foreach ($with in @($true, $false)) {
         $a = @{ Scenario = 'brightness'; Frames = $Frames }
         if ($Background) { $a['Background'] = $true }
         if (-not $with) { $a['NoConsumer'] = $true }
         $global:LASTEXITCODE = -1
-        try { & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null } catch { $global:LASTEXITCODE = -1 }
-        if ($LASTEXITCODE -ne 0) { Write-Host ("  FAIL: the {0} run exited {1}." -f ($with ? 'with-consumer' : 'without-consumer'), $LASTEXITCODE) -ForegroundColor Red; $means = $null; break }
-        if ($with -and -not (Select-String -Path (Join-Path $root 'run/brightness/ReShade.log') -Pattern 'DLSS5 Generic' -Quiet)) { Write-Host '  FAIL: the with-consumer run has no DLSS 5 add-on in it.' -ForegroundColor Red; $means = $null; break }
+        try { & (Join-Path $root 'run.ps1') @a *>&1 | Out-Null } catch { $global:LASTEXITCODE = -1 }
+        if ($LASTEXITCODE -ne 0) { Write-Host ("  FAIL: the {0} run exited {1}." -f ($with ? 'with-consumer' : 'without-consumer'), $LASTEXITCODE) -ForegroundColor Red; $means = $null; $bwhy = "runner exit $LASTEXITCODE"; break }
+        $rsl = Join-Path $root 'run/brightness/ReShade.log'
+        if ($with -and -not ((Test-Path $rsl) -and (Select-String -Path $rsl -Pattern 'DLSS5 Generic' -Quiet))) { Write-Host '  FAIL: the with-consumer run has no DLSS 5 add-on in it.' -ForegroundColor Red; $means = $null; $bwhy = 'consumer not staged'; break }
         $cl = Join-Path $root 'run/brightness/dlss5-bridge.log'
         $m = @{}
         if (Test-Path $cl) {
@@ -144,7 +155,11 @@ if ($Only -ne 'vk') {
         if (-not $ok) { $fail = $true }
     }
     if ($means[$false].Count -eq 0) { Write-Host '  FAIL: no output mean. The scenario must carry # cfg: hash_out=1.' -ForegroundColor Red; $fail = $true }
-    $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='brightness'; Pass=($fail ? 0 : 1); Fail=($fail ? 1 : 0); Why=($fail ? 'brightness moved' : '') }
+    # Four presentations -- float, scRGB, HDR10, SDR -- or the check compared
+    # fewer than it claims. HDR10 is refused on a display not in HDR mode, and
+    # that refusal used to shrink the set in silence.
+    elseif ($means[$false].Count -lt 4) { Write-Host ('  FAIL: {0} presentation(s) measured, 4 expected (float, scRGB, HDR10, SDR). Is the display in HDR mode?' -f $means[$false].Count) -ForegroundColor Red; $fail = $true; $bwhy = 'fewer than 4 presentations' }
+    $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='brightness'; Pass=($fail ? 0 : 1); Fail=($fail ? 1 : 0); Why=($fail ? $bwhy : '') }
 }
 
 $bad = @($rows | Where-Object { $_.Fail -gt 0 })

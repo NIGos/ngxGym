@@ -13,7 +13,7 @@
 
 [CmdletBinding()]
 param(
-    [string] $Scenario = 'phase0',
+    [string] $Scenario = '',
     [int]    $Frames   = 300,
     # 310.7.129.0, which has the DLAA enum member. Point this at Red Dead
     # Redemption 2's copy to stage 2.2.10.0, which does not -- that is the whole of
@@ -59,7 +59,11 @@ foreach ($p in @($exe, $addon, $shade)) {
     if (-not (Test-Path $p)) { Write-Host "FAIL: missing: $p" -ForegroundColor Red; exit 2 }
 }
 
-$run = Join-Path $root "run/$Scenario"
+if ($Scenario -and -not (Test-Path (Join-Path $root "scenarios/$Scenario.txt"))) {
+    Write-Host "FAIL: no scenarios/$Scenario.txt. A mistyped name used to run a plain frame count and pass." -ForegroundColor Red
+    exit 2
+}
+$run = Join-Path $root ("run/" + ($Scenario ? $Scenario : 'smoke'))
 # Clear the CONTENTS rather than the folder. Removing the directory itself fails
 # whenever anything holds a handle on it -- a shell sitting in it, an explorer
 # window -- so the contents go individually and a leftover is a hard failure below.
@@ -81,6 +85,7 @@ if ($stale) {
 
 Copy-Item $exe   $run
 Copy-Item $addon $run
+Write-Host ("add-on: {0}  {1:yyyy-MM-dd HH:mm:ss}" -f $addon, (Get-Item $addon).LastWriteTime) -ForegroundColor DarkGray
 # Named d3d11.dll, because that is the proxy ReShade needs to wrap the device a
 # D3D11 add-on subscribes to. If phase 0 registers but sees no device events, try
 # dxgi.dll instead -- one line here, not a redesign.
@@ -121,7 +126,8 @@ if (-not $NoSnippet) {
 # and staging only the exact name silently drops the consumer, which makes the
 # NR check below pass by never running.
 $dlss5 = if ($snipDir) { Get-ChildItem $snipDir -Filter 'renodx-dlss5*.addon64' -EA SilentlyContinue | Select-Object -First 1 } else { $null }
-if ($dlss5 -and -not $NoConsumer) { Copy-Item $dlss5.FullName (Join-Path $run 'renodx-dlss5.addon64') }
+$consumerStaged = $false
+if ($dlss5 -and -not $NoConsumer) { Copy-Item $dlss5.FullName (Join-Path $run 'renodx-dlss5.addon64'); $consumerStaged = $true }
 elseif ($NoConsumer) { Write-Host 'consumer: not staged (-NoConsumer)' -ForegroundColor DarkGray }
 else {
     # A run with no consumer proves the bridge built a contract for nobody, and
@@ -362,13 +368,17 @@ if ($mir.Count -ge 2 -and
 $hv = [regex]::Match((Get-Content $outf -Raw -ErrorAction SilentlyContinue), 'frames (\d+), evaluates (\d+), succeeded (\d+)')
 # "# host-may-fail" (or -d3d11): the scenario asks NGX itself for something it
 # refuses, and the refusal is the point rather than a defect in the host.
-$hostmayfail = $Scenario -and (Test-Path $scfile) -and (Select-String -Path $scfile -Pattern '^#\s*host-may-fail(-d3d11)?\b' -Quiet)
+$hostmayfail = $Scenario -and (Test-Path $scfile) -and (Select-String -Path $scfile -Pattern '^#\s*host-may-fail(-d3d11)?\s*$' -Quiet)
+if (-not $hv.Success) {
+    Write-Host "FAIL: the host printed no 'frames N, evaluates N, succeeded N' line; host.out is empty or not this host's." -ForegroundColor Red
+    exit 1
+}
 if (-not $hostmayfail -and $hv.Success -and [int]$hv.Groups[2].Value -gt 0 -and [int]$hv.Groups[3].Value -lt [int]$hv.Groups[2].Value) {
     Write-Host ("FAIL: the host's own DLSS evaluate failed {0} of {1} times." -f ([int]$hv.Groups[2].Value - [int]$hv.Groups[3].Value), $hv.Groups[2].Value) -ForegroundColor Red
     exit 1
 }
 # A step the host refused rather than performed is said, not hidden (item 13).
-foreach ($sk in (Select-String -Path $outf -Pattern 'refused, this run is in the background' -ErrorAction SilentlyContinue)) {
+foreach ($sk in (Select-String -Path $outf -Pattern 'refused, this run is in the background|refused 0x|staying in|does not own the display' -ErrorAction SilentlyContinue)) {
     Write-Host ("  SKIP: " + $sk.Line.Trim()) -ForegroundColor DarkYellow
 }
 
@@ -381,7 +391,7 @@ if (Test-Path $scfile) {
     # it proves nothing or fail on the other half.
     foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect(-d3d11)?:\s*(.+)$')) {
         $e = $m.Matches[0].Groups[2].Value.Trim()
-        if ($txt -notmatch [regex]::Escape($e)) {
+        if ($txt -cnotmatch [regex]::Escape($e)) {
             Write-Host "FAIL: the scenario expects '$e' in the log and it is not there." -ForegroundColor Red
             exit 1
         }
@@ -391,16 +401,25 @@ if (Test-Path $scfile) {
     # say -- that a thing happened again after a teardown, not only before it.
     foreach ($m in (Select-String -Path $scfile -Pattern ('^#\s*expect-after(-d3d11)?:\s*(.+?)\s*::\s*(.+)$'))) {
         $a = $m.Matches[0].Groups[2].Value.Trim(); $b = $m.Matches[0].Groups[3].Value.Trim()
-        $ia = $txt.LastIndexOf($a)
+        $ia = $txt.LastIndexOf($a, [StringComparison]::Ordinal)
         if ($ia -lt 0) {
             Write-Host "FAIL: the scenario expects '$b' after '$a', and '$a' is not in the log at all." -ForegroundColor Red
             exit 1
         }
-        if ($txt.IndexOf($b, $ia) -lt 0) {
+        if ($txt.IndexOf($b, $ia + $a.Length, [StringComparison]::Ordinal) -lt 0) {
             Write-Host "FAIL: the scenario expects '$b' after the last '$a', and it is not there." -ForegroundColor Red
             exit 1
         }
         Write-Host "  expect ok: $b after the last $a" -ForegroundColor DarkGray
+    }
+    # A directive that looks like an expectation and matches neither form above
+    # -- a typo, a missing "::", an empty string -- would otherwise be skipped in
+    # silence, which is a scenario proving less than its file says.
+    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect')) {
+        $l = $m.Line
+        if ($l -match '^#\s*expect(-d3d11|-vk)?:\s*\S' -or $l -match '^#\s*expect-after(-d3d11|-vk)?:\s*\S.*?\s*::\s*\S') { continue }
+        Write-Host "FAIL: unrecognised expectation directive in $Scenario.txt: $l" -ForegroundColor Red
+        exit 2
     }
 }
 
@@ -427,6 +446,10 @@ foreach ($m in $ready) {
 # neighbour add-on's own state and this suite must not report it as a bridge
 # defect. It is counted and printed so a change in it is visible.
 $rs = Join-Path $run 'ReShade.log'
+if ($consumerStaged -and -not ((Test-Path $rs) -and ((Get-Content $rs -Raw) -match 'DLSS5 Generic'))) {
+    Write-Host "FAIL: the DLSS 5 add-on was staged and ReShade.log never mentions it; it did not load." -ForegroundColor Red
+    exit 1
+}
 if (Test-Path $rs) {
     $rt = Get-Content $rs -Raw
     if ($rt -match 'DLSS5 Generic') {

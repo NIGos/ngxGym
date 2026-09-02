@@ -14,4 +14,6 @@ frames 1500
 stale off
 frames 300
 
+# nofast
 # expect: The create is used
+# expect-after: The create is used :: frames delivered so far

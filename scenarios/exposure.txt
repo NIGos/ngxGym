@@ -13,5 +13,4 @@ frames 1900
 exposure off
 frames 1900
 
-# expect-d3d11: it is mirrored to D3D12 so both sides run the same contract
-# expect-vk: it is mirrored to D3D12 so both sides run the same contract
+# expect: it is mirrored to D3D12 so both sides run the same contract
