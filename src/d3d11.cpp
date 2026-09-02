@@ -279,9 +279,15 @@ static bool Rebuild(Host &h, const char *why)
     // render size. Kept out of the four deliberately, because most games supply none
     // and the add-on under test keeps its own mirror of it out of its slot array for
     // the same reason.
-    if (h.exposure.tex == nullptr &&
-        !MakeTex(h.dev, &h.exposure, 1, 1, DXGI_FORMAT_R32_FLOAT, D3D11_BIND_SHADER_RESOURCE))
-    { printf("FAIL: exposure texture\n"); return false; }
+    if (h.exposure.tex == nullptr)
+    {
+        if (!MakeTex(h.dev, &h.exposure, 1, 1, DXGI_FORMAT_R32_FLOAT, D3D11_BIND_SHADER_RESOURCE))
+        { printf("FAIL: exposure texture\n"); return false; }
+        // A value, not zeroes: an exposure of 0 is not something a game hands
+        // over, and the bridge reads the value back and logs it.
+        const float one = 1.0f;
+        h.ctx->UpdateSubresource(h.exposure.tex, 0, nullptr, &one, sizeof(one), sizeof(one));
+    }
 
     ReleaseFeat(h);
 
