@@ -87,11 +87,8 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
     while (fgets(line, sizeof(line), f) != nullptr)
     {
         ++no;
-        char verb[32] = {}, a1[32] = {}, a2[32] = {};
-        const int n = sscanf_s(line, "%31s %31s %31s",
-                               verb, static_cast<unsigned>(sizeof(verb)),
-                               a1,   static_cast<unsigned>(sizeof(a1)),
-                               a2,   static_cast<unsigned>(sizeof(a2)));
+        char verb[32] = {}, a1[32] = {}, a2[32] = {}, a3[32] = {};
+        const int n = sscanf_s(line, "%31s %31s %31s %31s", verb, static_cast<unsigned>(sizeof(verb)), a1, static_cast<unsigned>(sizeof(a1)), a2, static_cast<unsigned>(sizeof(a2)), a3, static_cast<unsigned>(sizeof(a3)));
         if (n < 1 || verb[0] == '#') continue;
 
         if      (_stricmp(verb, "frames")   == 0 && n >= 2) ScenarioAdd(s, STEP_FRAMES, atoi(a1));
@@ -112,7 +109,13 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
         else if (_stricmp(verb, "sdr") == 0 && n >= 2)
             ScenarioAdd(s, STEP_SDR, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "scrgb") == 0 && n >= 2)
-            ScenarioAdd(s, STEP_SCRGB, _stricmp(a1, "on") == 0 ? 1 : 0);
+            // Optional peak in nits for the scene's brightest pixel; 640 by default.
+            // b carries the peak in nits, and a fourth word "g22" asks for the
+            // gamma-2.2 colour space instead of linear, which a game that never
+            // calls SetColorSpace1 leaves on a float swapchain. Encoded as a
+            // negative peak, since Step has two fields.
+            ScenarioAdd(s, STEP_SCRGB, _stricmp(a1, "on") == 0 ? 1 : 0,
+                        (n >= 3 ? atoi(a2) : 640) * ((n >= 4 && _stricmp(a3, "g22") == 0) ? -1 : 1));
         else if (_stricmp(verb, "depthcolor") == 0 && n >= 2)
             ScenarioAdd(s, STEP_DEPTHCOLOR, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "pad") == 0 && n >= 2)

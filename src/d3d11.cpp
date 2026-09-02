@@ -436,14 +436,20 @@ static bool ApplySdr(Host &h, bool on)
     h.scene_gain = 1.0f; h.scene_pq = false;
     return ApplyDisplay(h, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "sdr on");
 }
-static bool ApplyScrgb(Host &h, bool on)
+static bool ApplyScrgb(Host &h, bool on, int nits)
 {
     if (!on) return ApplyOff(h, "scrgb off");
-    h.scene_gain = 8.0f; h.scene_pq = false;
+    // scRGB: 1.0 is 80 nits, so the scene's brightest pixel lands at nits. A
+    // negative peak asks for the gamma-2.2 colour space, see the parser.
+    const bool g22 = nits < 0;
+    if (nits < 0) nits = -nits;
+    h.scene_gain = (nits > 0 ? nits : 640) / 80.0f; h.scene_pq = false;
     // Same format as off, so ApplyDisplay's "unchanged" shortcut would skip the
     // colour space and the flag; force the resize by clearing the format first.
     h.display_fmt = DXGI_FORMAT_UNKNOWN;
-    return ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, true, "scrgb on");
+    return ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT,
+                        g22 ? DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
+                        true, g22 ? "scrgb on (g22)" : "scrgb on");
 }
 
 static bool RenderFrame(Host &h)
@@ -873,7 +879,7 @@ int main(int argc, char **argv)
             break;
         case STEP_SCRGB:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
-            if (!ApplyScrgb(h, st.a != 0)) rc = 4;
+            if (!ApplyScrgb(h, st.a != 0, st.b)) rc = 4;
             break;
         case STEP_DEPTHCOLOR:
             printf("FAIL: depthcolor is not implemented on the D3D11 host\n");

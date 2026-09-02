@@ -88,7 +88,7 @@ A scenario is a text file of verbs in `scenarios\`, one per line:
 | `dlss on\|off` | stop and restart calling DLSS. Off, no feature is created on a mode change either |
 | `nodlss` | never initialise NGX or create a feature: a game without DLSS. Render sizes then follow the published DLSS ratios |
 | `hdr on\|off` | HDR10: `R10G10B10A2`, PQ colour space, the scene PQ-encoded as nits up to 1000, IsHDR set. Off is the default float swapchain |
-| `scrgb on\|off` | scRGB HDR: float swapchain, linear colour space, the scene scaled to 640 nits, IsHDR set. D3D11 host only |
+| `scrgb on\|off [nits] [g22]` | scRGB HDR: float swapchain, linear colour space, IsHDR set, the scene's brightest pixel at `nits` (640 by default); `g22` leaves the gamma-2.2 colour space on the swapchain, as a game that never sets one does. D3D11 host only |
 | `sdr on\|off` | 8-bit SDR: `R8G8B8A8`, sRGB colour space. D3D11 host only |
 | `depthcolor on\|off` | hand NGX the depth as an `R32_SFLOAT` colour image, as RTX Remix does. Vulkan host only |
 | `pad N` | allocate every texture N rows taller than the contract, as a game padded for dynamic resolution does. D3D11 host only |
