@@ -29,13 +29,20 @@ param(
     [switch] $Validate,
     # Divide every 'frames N' in the scenario by this. See the block below.
     [int]    $Scale = 1,
-    [string] $Snippet = 'D:\SteamLibrary\steamapps\common\Baldurs Gate 3\bin\nvngx_dlss.dll'
+    # The DLSS snippet to stage, 3.1.13 or newer; a renodx-dlss5*.addon64 beside
+    # it is staged as the consumer under test.
+    [string] $Snippet = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'snippets\nvngx_dlss.dll'),
+    # The add-on under test: a copy beside this script, else a sibling checkout.
+    [string] $Addon = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $root  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $exe   = Join-Path $root 'bin\ngxGym-vk.exe'
-$addon = 'C:\Users\quali\Documents\Code Projects\Misc\ngxbridge\dlss5-bridge.addon64'
+$addon = if ($Addon) { $Addon }
+         elseif (Test-Path (Join-Path $root 'dlss5-bridge.addon64')) { Join-Path $root 'dlss5-bridge.addon64' }
+         else { Join-Path (Split-Path -Parent $root) 'ngxbridge\dlss5-bridge.addon64' }
+if (-not (Test-Path $addon)) { Write-Error "no dlss5-bridge.addon64: put one beside this script or pass -Addon"; exit 2 }
 $apps  = 'C:\ProgramData\ReShade\ReShadeApps.ini'
 $run   = Join-Path $root 'run\vk'
 $target = Join-Path $run 'ngxGym-vk.exe'

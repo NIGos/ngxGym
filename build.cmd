@@ -3,24 +3,27 @@ rem ngxGym -- build. One compiler invocation, no build system, on purpose: the
 rem thing under test is built with a single cl.exe line and this should not be
 rem harder to build than what it tests.
 rem
-rem The Vulkan host arrives in phase 4. The Vulkan SDK is installed
-rem (C:\VulkanSDK\1.4.357.0) and brings glslc and the Khronos validation layer,
-rem which is that half's only real oracle.
+rem Paths, all overridable from the environment:
+rem   VCVARS      vcvars64.bat of a Visual Studio or Build Tools install
+rem   NGX_SDK     NVIDIA's DLSS SDK (github.com/NVIDIA/DLSS): include\ and lib\
+rem   VULKAN_SDK  the Vulkan SDK, for glslc and the Khronos validation layer.
+rem               Optional: without it only the D3D11 host is built.
 
 setlocal
-set VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat
+if "%VCVARS%"=="" set VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat
 if not exist "%VCVARS%" (
   echo build.cmd: no vcvars64.bat at "%VCVARS%"
   exit /b 1
 )
 call "%VCVARS%" >nul 2>&1
 
-rem NVIDIA's DLSS SDK, already on this disk from another project. Because this
-rem builds /MT, the static-CRT NGX library is the right one: nvsdk_ngx_s.lib.
-rem nvsdk_ngx_d.lib is the /MD build and linking it here gives duplicate-CRT errors.
-set NGX=C:\Users\quali\Documents\Code Projects\BH Solver\profork\build\release\_deps\dlss-src
+rem NVIDIA's DLSS SDK. This builds /MT, so the static-CRT NGX library is the
+rem right one: nvsdk_ngx_s.lib. nvsdk_ngx_d.lib is the /MD build and gives
+rem duplicate-CRT errors here.
+set NGX=%NGX_SDK%
+if "%NGX%"=="" set NGX=%~dp0dlss-sdk
 if not exist "%NGX%\include\nvsdk_ngx.h" (
-  echo build.cmd: no DLSS SDK headers at "%NGX%\include"
+  echo build.cmd: no DLSS SDK at "%NGX%" -- set NGX_SDK, or clone github.com/NVIDIA/DLSS to dlss-sdk\ beside this file
   exit /b 1
 )
 

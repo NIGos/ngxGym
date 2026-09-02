@@ -9,3 +9,6 @@ run/
 *.log
 
 vault/
+snippets/
+dlss-sdk/
+dlss5-bridge.addon64

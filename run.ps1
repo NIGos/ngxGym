@@ -20,7 +20,12 @@ param(
     # the "old snippet" scenario, a file copy rather than a feature.
     # Divide every 'frames N' in the scenario by this. See the block below.
     [int]    $Scale = 1,
-    [string] $Snippet  = 'D:\SteamLibrary\steamapps\common\Baldurs Gate 3\bin\nvngx_dlss.dll',
+    # The DLSS snippet to stage, 3.1.13 or newer. Whatever else sits beside it is
+    # staged too: a renodx-dlss5*.addon64 there is the consumer under test.
+    [string] $Snippet  = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'snippets\nvngx_dlss.dll'),
+    # The add-on under test. Defaults to a copy beside this script, then to a
+    # sibling checkout of the bridge.
+    [string] $Addon    = '',
     [switch] $NoSnippet,
     # Stage no DLSS 5 add-on. The other half of the consumer check: the bridge's
     # own output hash with a consumer must differ from the one without.
@@ -34,7 +39,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $root   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $exe    = Join-Path $root 'bin\ngxGym.exe'
-$addon  = 'C:\Users\quali\Documents\Code Projects\Misc\ngxbridge\dlss5-bridge.addon64'
+$addon  = if ($Addon) { $Addon }
+          elseif (Test-Path (Join-Path $root 'dlss5-bridge.addon64')) { Join-Path $root 'dlss5-bridge.addon64' }
+          else { Join-Path (Split-Path -Parent $root) 'ngxbridge\dlss5-bridge.addon64' }
+if (-not (Test-Path $addon)) { Write-Error "no dlss5-bridge.addon64: put one beside this script or pass -Addon"; exit 2 }
 $shade  = 'C:\ProgramData\ReShade\ReShade64.dll'
 
 foreach ($p in @($exe, $addon, $shade)) {
