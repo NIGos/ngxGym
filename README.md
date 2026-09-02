@@ -87,7 +87,8 @@ A scenario is a text file of verbs in `scenarios\`, one per line:
 | `recreate` | create the feature again at an unchanged shape |
 | `dlss on\|off` | stop and restart calling DLSS. Off, no feature is created on a mode change either |
 | `nodlss` | never initialise NGX or create a feature: a game without DLSS. Render sizes then follow the published DLSS ratios |
-| `hdr on\|off` | swapchain colour space and the IsHDR create flag |
+| `hdr on\|off` | HDR10 swapchain (`R10G10B10A2`, PQ) and the IsHDR create flag; off is scRGB float |
+| `sdr on\|off` | 8-bit SDR swapchain (`R8G8B8A8`, sRGB). D3D11 host only |
 | `exposure on\|off` | supply an ExposureTexture |
 | `transpose on\|off` | declare the contract the wrong way round |
 | `stale on\|off` | evaluate with another feature's four scalars |
@@ -102,6 +103,7 @@ Directives in comments:
 | `# cfg: key=value` | appended to the generated `dlss5-bridge.cfg` |
 | `# cfg-old-file` | leave the settings file unstamped, to test its replacement |
 | `# nofast` | run in full under `-Fast` |
+| `# d3d11-only` | the suite skips the scenario on the Vulkan host |
 
 A verb the parser accepts and the executor drops fails the run rather than
 passing it.
@@ -119,6 +121,12 @@ The suite adds one check that measures the neighbour rather than the add-on:
 `consumer` runs twice, with and without the DLSS 5 add-on staged, and the
 add-on's own output hash must differ. It exists because a build of that add-on
 reported active and wrote nothing, and nothing else here could tell.
+
+A second one measures brightness: `brightness` builds the feature on three
+swapchains in turn, scRGB float, HDR10 and 8-bit SDR, and the add-on logs the
+mean of its output per channel 60 frames into each. With and without the DLSS
+5 add-on, per format, the luma ratio has to stay within [0.5, 2]. A neural pass
+that overexposes an HDR frame fails here and nowhere else.
 
 ## Layout
 

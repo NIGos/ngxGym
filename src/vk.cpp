@@ -1093,6 +1093,13 @@ int main(int argc, char **argv)
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             if (!ApplyHdr(h, st.a != 0)) rc = 4;
             break;
+        case STEP_SDR:
+            // Not on this host: a step accepted and dropped is a run that proves
+            // something other than what its file says. Mark the scenario
+            // "# d3d11-only" and the suite skips it here.
+            printf("FAIL: sdr is not implemented on the Vulkan host\n");
+            rc = 4;
+            break;
         case STEP_EXPOSURE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.exposure_on = st.a != 0;

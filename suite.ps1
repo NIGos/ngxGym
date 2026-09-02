@@ -36,6 +36,8 @@ $rows = @()
 foreach ($b in $backends) {
     $runner = Join-Path $root ($b -eq 'vk' ? 'run-vk.ps1' : 'run.ps1')
     foreach ($s in $scenarios) {
+        # "# d3d11-only": a scenario using a verb the Vulkan host does not have.
+        if ($b -eq 'vk' -and (Select-String -Path (Join-Path $root "scenarios/$s.txt") -Pattern '^#\s*d3d11-only' -Quiet)) { continue }
         $pass = 0; $fail = 0; $why = ''
         for ($i = 0; $i -lt $Repeat; ++$i) {
             $args = @{ Frames = $Frames; Scenario = $s }
@@ -93,6 +95,43 @@ if ($Only -ne 'vk') {
         Write-Host '  ok: the consumer changed the output.' -ForegroundColor Green
         $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='consumer'; Pass=1; Fail=0; Why='' }
     }
+}
+
+# The brightness check, once, on D3D11. The neural pass may change the
+# picture; it must not change its brightness by a factor. The bridge logs the
+# mean of its output per feature build, and the brightness scenario builds
+# three: scRGB float, HDR10 and 8-bit SDR. Compared with and without the DLSS 5
+# add-on staged, per format; a luma ratio outside [0.5, 2] fails. An HDR frame
+# the neural pass overexposed (dlss5-bridge #10) is what this is for.
+if ($Only -ne 'vk') {
+    Write-Host ''
+    Write-Host 'brightness check: does the DLSS 5 add-on keep the picture at its brightness?'
+    $means = @{}
+    foreach ($with in @($true, $false)) {
+        $a = @{ Scenario = 'brightness'; Frames = $Frames }
+        if ($Background) { $a['Background'] = $true }
+        if (-not $with) { $a['NoConsumer'] = $true }
+        & (Join-Path $root 'run.ps1') @a 2>&1 | Out-Null
+        $cl = Join-Path $root 'run/brightness/dlss5-bridge.log'
+        $m = @{}
+        if (Test-Path $cl) {
+            foreach ($l in (Select-String -Path $cl -Pattern 'output mean after evaluate \d+: .*luma=([0-9.]+) \(([^)]+)\)')) {
+                $m[$l.Matches[0].Groups[2].Value] = [double]$l.Matches[0].Groups[1].Value
+            }
+        }
+        $means[$with] = $m
+    }
+    $fail = $false
+    foreach ($fmt in $means[$false].Keys) {
+        if (-not $means[$true].ContainsKey($fmt)) { Write-Host ('  {0,-24} no reading with the consumer' -f $fmt) -ForegroundColor Red; $fail = $true; continue }
+        $w = $means[$true][$fmt]; $wo = $means[$false][$fmt]
+        $ratio = if ($wo -gt 0) { $w / $wo } else { 0 }
+        $ok = $ratio -ge 0.5 -and $ratio -le 2.0
+        Write-Host ('  {0,-24} luma without {1:F4}  with {2:F4}  ratio {3:F2}' -f $fmt, $wo, $w, $ratio) -ForegroundColor ($ok ? 'Green' : 'Red')
+        if (-not $ok) { $fail = $true }
+    }
+    if ($means[$false].Count -eq 0) { Write-Host '  FAIL: no output mean. The scenario must carry # cfg: hash_out=1.' -ForegroundColor Red; $fail = $true }
+    $rows += [pscustomobject]@{ Backend='d3d11'; Scenario='brightness'; Pass=($fail ? 0 : 1); Fail=($fail ? 1 : 0); Why=($fail ? 'brightness moved' : '') }
 }
 
 $bad = @($rows | Where-Object { $_.Fail -gt 0 })

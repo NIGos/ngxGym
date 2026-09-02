@@ -371,24 +371,34 @@ static bool ApplyMode(Host &h, Mode m)
     return ResizeToWindow(h, "mode change");
 }
 
-static bool ApplyHdr(Host &h, bool on)
+// Three swapchains a game presents: scRGB float (the default here), HDR10,
+// and plain 8-bit SDR. Changing the format is a ResizeBuffers, which is also a
+// rebuild -- deliberately the same path a resolution change takes, because
+// that is what a game does here too. IsHDR follows HDR10 only.
+static bool ApplyDisplay(Host &h, DXGI_FORMAT fmt, DXGI_COLOR_SPACE_TYPE space, bool hdr, const char *why)
 {
-    if (on == h.hdr) return true;
-    h.hdr = on;
-    // scRGB float for SDR, HDR10 for on. Changing the swapchain format is a
-    // ResizeBuffers, which is also a rebuild -- deliberately the same path a
-    // resolution change takes, because that is what a game does here too.
-    h.display_fmt = on ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
-    if (!ResizeToWindow(h, on ? "hdr on" : "hdr off")) return false;
+    if (fmt == h.display_fmt) return true;
+    h.hdr = hdr;
+    h.display_fmt = fmt;
+    if (!ResizeToWindow(h, why)) return false;
 
     IDXGISwapChain3 *sc3 = nullptr;
     if (SUCCEEDED(h.sc->QueryInterface(IID_PPV_ARGS(&sc3))) && sc3 != nullptr)
     {
-        sc3->SetColorSpace1(on ? DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
-                               : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+        sc3->SetColorSpace1(space);
         sc3->Release();
     }
     return true;
+}
+static bool ApplyHdr(Host &h, bool on)
+{
+    return on ? ApplyDisplay(h, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, true, "hdr on")
+              : ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "hdr off");
+}
+static bool ApplySdr(Host &h, bool on)
+{
+    return on ? ApplyDisplay(h, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "sdr on")
+              : ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "sdr off");
 }
 
 static bool RenderFrame(Host &h)
@@ -807,6 +817,10 @@ int main(int argc, char **argv)
         case STEP_HDR:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             if (!ApplyHdr(h, st.a != 0)) rc = 4;
+            break;
+        case STEP_SDR:
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            if (!ApplySdr(h, st.a != 0)) rc = 4;
             break;
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
