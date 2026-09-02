@@ -717,14 +717,6 @@ static void PrintNvModules()
     }
 }
 
-static void PrintPresentStats(IDXGISwapChain1 *sc)
-{
-    DXGI_FRAME_STATISTICS st = {};
-    const HRESULT hr = sc != nullptr ? sc->GetFrameStatistics(&st) : E_POINTER;
-    if (FAILED(hr)) { printf("present statistics: unavailable (0x%08X)\n", static_cast<unsigned>(hr)); return; }
-    printf("present statistics: PresentCount %u  PresentRefreshCount %u  SyncRefreshCount %u\n",
-           st.PresentCount, st.PresentRefreshCount, st.SyncRefreshCount);
-}
 
 int main(int argc, char **argv)
 {
@@ -945,7 +937,6 @@ int main(int argc, char **argv)
     if (h.frame < want_frames)
     { printf("FAIL: ran %d of %d frames the scenario asked for\n", h.frame, want_frames); return 6; }
     PrintNvModules();
-    PrintPresentStats(h.sc);
     if (rc != 0) { printf("FAIL: scenario stopped\n"); return rc; }
     if (h.evaluated > 0 && h.delivered == 0) { printf("FAIL: no evaluate succeeded\n"); return 4; }
     printf("ok\n");
