@@ -78,7 +78,7 @@ if ($Only -ne 'vk') {
         # Read from the LOG, not from the runner's output. Write-Host does not
         # go down the pipeline, and capturing it is how this check silently
         # compared two empty strings the first time it ran.
-        $cl = Join-Path $root 'run\consumer\dlss5-bridge.log'
+        $cl = Join-Path $root 'run/consumer/dlss5-bridge.log'
         $line = if (Test-Path $cl) { Select-String -Path $cl -Pattern 'output hash after evaluate' | Select-Object -First 1 } else { $null }
         $hashes[$with] = if ($line) { [regex]::Match($line.ToString(), '([0-9A-F]{16})').Groups[1].Value } else { '' }
         Write-Host ('  {0,-14} {1}' -f ($with ? 'with consumer' : 'without'), $hashes[$with])

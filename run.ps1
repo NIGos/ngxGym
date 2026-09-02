@@ -22,10 +22,20 @@ param(
     [int]    $Scale = 1,
     # The DLSS snippet to stage, 3.1.13 or newer. Whatever else sits beside it is
     # staged too: a renodx-dlss5*.addon64 there is the consumer under test.
-    [string] $Snippet  = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'snippets\nvngx_dlss.dll'),
+    [string] $Snippet  = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'snippets/nvngx_dlss.dll'),
     # The add-on under test. Defaults to a copy beside this script, then to a
     # sibling checkout of the bridge.
     [string] $Addon    = '',
+    # ReShade64.dll to stage. The Windows installer's copy by default.
+    [string] $Shade    = 'C:\ProgramData\ReShade\ReShade64.dll',
+    # The name ReShade is staged under: d3d11 on Windows, dxgi under Proton,
+    # where the prefix's d3d11 is DXVK and ReShade sits in front of DXGI.
+    [ValidateSet('d3d11','dxgi')] [string] $Proxy = 'd3d11',
+    # A command to start the host through -- 'umu-run' under Proton. Sets the
+    # DLL override the proxy needs. Empty on Windows.
+    [string] $Launcher = '',
+    # Assemble the run folder and stop, for running the host by hand.
+    [switch] $StageOnly,
     [switch] $NoSnippet,
     # Stage no DLSS 5 add-on. The other half of the consumer check: the bridge's
     # own output hash with a consumer must differ from the one without.
@@ -38,18 +48,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root   = Split-Path -Parent $MyInvocation.MyCommand.Path
-$exe    = Join-Path $root 'bin\ngxGym.exe'
+$exe    = Join-Path $root 'bin/ngxGym.exe'
 $addon  = if ($Addon) { $Addon }
           elseif (Test-Path (Join-Path $root 'dlss5-bridge.addon64')) { Join-Path $root 'dlss5-bridge.addon64' }
-          else { Join-Path (Split-Path -Parent $root) 'ngxbridge\dlss5-bridge.addon64' }
+          else { Join-Path (Split-Path -Parent $root) 'ngxbridge/dlss5-bridge.addon64' }
 if (-not (Test-Path $addon)) { Write-Error "no dlss5-bridge.addon64: put one beside this script or pass -Addon"; exit 2 }
-$shade  = 'C:\ProgramData\ReShade\ReShade64.dll'
+$shade  = $Shade
 
 foreach ($p in @($exe, $addon, $shade)) {
     if (-not (Test-Path $p)) { Write-Error "missing: $p"; exit 2 }
 }
 
-$run = Join-Path $root "run\$Scenario"
+$run = Join-Path $root "run/$Scenario"
 # Clear the CONTENTS rather than the folder. Removing the directory itself fails
 # whenever anything holds a handle on it -- a shell sitting in it, an explorer
 # window -- so the contents go individually and a leftover is a hard failure below.
@@ -74,7 +84,7 @@ Copy-Item $addon $run
 # Named d3d11.dll, because that is the proxy ReShade needs to wrap the device a
 # D3D11 add-on subscribes to. If phase 0 registers but sees no device events, try
 # dxgi.dll instead -- one line here, not a redesign.
-Copy-Item $shade (Join-Path $run 'd3d11.dll')
+Copy-Item $shade (Join-Path $run "$Proxy.dll")
 if (-not $NoSnippet) {
     # Resolved once and guarded. Split-Path throws on a path whose drive does not
     # exist, so pointing -Snippet at a deliberately absent file -- which is how you
@@ -155,7 +165,7 @@ Write-Host "run folder: $run"
 # A scenario file if one exists by that name, otherwise a plain frame count. The
 # file is copied in so the run folder is self-contained and a scenario edited
 # mid-suite cannot change what a finished run did.
-$scfile = Join-Path $root "scenarios\$Scenario.txt"
+$scfile = Join-Path $root "scenarios/$Scenario.txt"
 if (Test-Path $scfile) {
     Copy-Item $scfile $run
     $hostArg = "$Scenario.txt"
@@ -235,9 +245,21 @@ $errf = Join-Path $run 'host.err'
 # because it takes the display whatever anybody wants.
 if ($Background) { $env:NGXGYM_BACKGROUND = '1' } else { $env:NGXGYM_BACKGROUND = '0' }
 
-$p = Start-Process -FilePath (Join-Path $run 'ngxGym.exe') -ArgumentList $hostArg `
-                   -WorkingDirectory $run -PassThru -Wait -NoNewWindow `
-                   -RedirectStandardOutput $outf -RedirectStandardError $errf
+if ($StageOnly) {
+    Write-Host "staged only. Run the host from $run with: ngxGym.exe $hostArg"
+    exit 0
+}
+if ($Launcher) {
+    # Under Wine the proxy beside the executable wins only with an override.
+    $env:WINEDLLOVERRIDES = "$Proxy=n,b"
+    $p = Start-Process -FilePath $Launcher -ArgumentList @('ngxGym.exe', $hostArg) `
+                       -WorkingDirectory $run -PassThru -Wait -NoNewWindow `
+                       -RedirectStandardOutput $outf -RedirectStandardError $errf
+} else {
+    $p = Start-Process -FilePath (Join-Path $run 'ngxGym.exe') -ArgumentList $hostArg `
+                       -WorkingDirectory $run -PassThru -Wait -NoNewWindow `
+                       -RedirectStandardOutput $outf -RedirectStandardError $errf
+}
 if (Test-Path $outf) { Get-Content $outf }
 Write-Host "host exit: $($p.ExitCode)"
 if ($p.ExitCode -ne 0) {

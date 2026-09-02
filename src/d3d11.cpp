@@ -217,11 +217,24 @@ static void ReleaseFeat(Host &h)
 // there is only one place that can get the order wrong.
 static bool Rebuild(Host &h, const char *why)
 {
-    unsigned int maxw = 0, maxh = 0, minw = 0, minh = 0;
-    float sharp = 0.0f;
-    NGX_DLSS_GET_OPTIMAL_SETTINGS(h.caps, h.out_w, h.out_h,
-                                  static_cast<NVSDK_NGX_PerfQuality_Value>(h.quality),
-                                  &h.rw, &h.rh, &maxw, &maxh, &minw, &minh, &sharp);
+    if (h.caps != nullptr)
+    {
+        unsigned int maxw = 0, maxh = 0, minw = 0, minh = 0;
+        float sharp = 0.0f;
+        NGX_DLSS_GET_OPTIMAL_SETTINGS(h.caps, h.out_w, h.out_h,
+                                      static_cast<NVSDK_NGX_PerfQuality_Value>(h.quality),
+                                      &h.rw, &h.rh, &maxw, &maxh, &minw, &minh, &sharp);
+    }
+    else
+    {
+        // nodlss: NGX was never initialised, so the render size comes from the
+        // published DLSS ratios instead of from the snippet. MaxPerf, Balanced,
+        // MaxQuality, UltraPerformance, UltraQuality, DLAA, in NGX's own order.
+        static const float kRatio[6] = { 0.5f, 0.58f, 0.6667f, 0.3333f, 0.77f, 1.0f };
+        const float r = (h.quality >= 0 && h.quality < 6) ? kRatio[h.quality] : 1.0f;
+        h.rw = static_cast<UINT>(h.out_w * r + 0.5f);
+        h.rh = static_cast<UINT>(h.out_h * r + 0.5f);
+    }
     if (h.rw == 0 || h.rh == 0) { h.rw = h.out_w; h.rh = h.out_h; }
 
     printf("  rebuild (%s): %ux%u -> %ux%u, quality %d, hdr %d\n",
@@ -704,6 +717,8 @@ int main(int argc, char **argv)
     // A real GUID, 8-4-4-4-12 hex. NGX parses this rather than hashing it, and
     // answers 0xBAD00005 InvalidParameter to a malformed one -- which is worth
     // knowing, because that code usually means something else entirely.
+    if (sc.nodlss) printf("nodlss: NGX is not initialised, as in a game without DLSS\n");
+    else {
     NVSDK_NGX_Result nr = NVSDK_NGX_D3D11_Init_with_ProjectID(
         "a7d3f0c8-6b21-4e5a-9f14-3c07b1e9d240", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0",
         here, h.dev, &ci, NVSDK_NGX_Version_API);
@@ -722,6 +737,7 @@ int main(int argc, char **argv)
     }
     if (NVSDK_NGX_FAILED(NVSDK_NGX_D3D11_AllocateParameters(&h.p)) || !h.p)
     { printf("FAIL: AllocateParameters\n"); return 3; }
+    }
 
     ID3DBlob *vsb = nullptr, *psb = nullptr, *err = nullptr;
     if (FAILED(D3DCompile(kShader, sizeof(kShader) - 1, "scene", nullptr, nullptr,

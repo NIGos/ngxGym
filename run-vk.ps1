@@ -31,20 +31,20 @@ param(
     [int]    $Scale = 1,
     # The DLSS snippet to stage, 3.1.13 or newer; a renodx-dlss5*.addon64 beside
     # it is staged as the consumer under test.
-    [string] $Snippet = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'snippets\nvngx_dlss.dll'),
+    [string] $Snippet = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'snippets/nvngx_dlss.dll'),
     # The add-on under test: a copy beside this script, else a sibling checkout.
     [string] $Addon = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $root  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$exe   = Join-Path $root 'bin\ngxGym-vk.exe'
+$exe   = Join-Path $root 'bin/ngxGym-vk.exe'
 $addon = if ($Addon) { $Addon }
          elseif (Test-Path (Join-Path $root 'dlss5-bridge.addon64')) { Join-Path $root 'dlss5-bridge.addon64' }
-         else { Join-Path (Split-Path -Parent $root) 'ngxbridge\dlss5-bridge.addon64' }
+         else { Join-Path (Split-Path -Parent $root) 'ngxbridge/dlss5-bridge.addon64' }
 if (-not (Test-Path $addon)) { Write-Error "no dlss5-bridge.addon64: put one beside this script or pass -Addon"; exit 2 }
 $apps  = 'C:\ProgramData\ReShade\ReShadeApps.ini'
-$run   = Join-Path $root 'run\vk'
+$run   = Join-Path $root 'run/vk'
 $target = Join-Path $run 'ngxGym-vk.exe'
 
 if (-not (Test-Path $exe)) { Write-Error "missing: $exe (build.cmd skips it without the Vulkan SDK)"; exit 2 }
@@ -134,7 +134,7 @@ if ($Validate) {
 $outf = Join-Path $run 'host.out'
 $errf = Join-Path $run 'host.err'
 $hostArg = "$Frames"
-$scfile = Join-Path $root "scenarios\$Scenario.txt"
+$scfile = Join-Path $root "scenarios/$Scenario.txt"
 if ($Scenario -and (Test-Path $scfile)) {
     Copy-Item $scfile $run
     $hostArg = "$Scenario.txt"

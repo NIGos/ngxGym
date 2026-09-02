@@ -56,6 +56,24 @@ refused in that mode. `vault.ps1` keeps hashed copies of the third-party files
 a run stages, recorded in `vault.tsv`, so an A/B between two builds of a
 neighbour add-on is one command: `.\vault.ps1 -Use <label> -To <folder>`.
 
+### Under Proton
+
+Not tested here; written for a reporter on Linux, and reports are welcome. The
+D3D11 host is a plain Windows program and runs under umu/Proton; `run.ps1`
+runs under PowerShell for Linux (`pwsh`). ReShade goes in as `dxgi.dll` with a
+DLL override, the way it is installed in a Proton game, and the host is
+started through the launcher:
+
+```
+pwsh ./run.ps1 -Scenario synth-nodlss-modes -Launcher umu-run -Proxy dxgi \
+     -Shade /path/to/ReShade64.dll -Addon /path/to/dlss5-bridge.addon64
+```
+
+`-Launcher` prefixes the host command and sets `WINEDLLOVERRIDES=dxgi=n,b`;
+`-StageOnly` assembles the run folder and stops, for running the host by hand.
+The verdict reads the same log lines as on Windows. The Vulkan host needs
+ReShade's Vulkan layer inside the prefix and is not covered by the runner.
+
 ## Scenarios
 
 A scenario is a text file of verbs in `scenarios\`, one per line:
@@ -68,7 +86,7 @@ A scenario is a text file of verbs in `scenarios\`, one per line:
 | `preset 0..5` | DLSS quality; the render size follows. `5` is DLAA |
 | `recreate` | create the feature again at an unchanged shape |
 | `dlss on\|off` | stop and restart calling DLSS. Off, no feature is created on a mode change either |
-| `nodlss` | never create a feature: a game without DLSS |
+| `nodlss` | never initialise NGX or create a feature: a game without DLSS. Render sizes then follow the published DLSS ratios |
 | `hdr on\|off` | swapchain colour space and the IsHDR create flag |
 | `exposure on\|off` | supply an ExposureTexture |
 | `transpose on\|off` | declare the contract the wrong way round |
