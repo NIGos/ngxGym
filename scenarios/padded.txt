@@ -1,0 +1,14 @@
+# Textures taller than the contract: a game padded for dynamic resolution
+# allocates 5120x2048 for a 5120x1440 display (House Party, dlss5-bridge #8 and
+# pull request #9). The bridge used to read the mismatch as a partial region
+# and stand aside on every such frame. It has to write the region at 0,0 and
+# keep delivering, as the game's own DLSS does with the same block.
+frames 120
+pad 60
+frames 900
+
+# d3d11-only
+# nofast
+
+# expect: The region at 0,0 is written
+# expect-after: created its feature again :: frames delivered so far

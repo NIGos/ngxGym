@@ -157,6 +157,10 @@ struct Host
     NVSDK_NGX_Handle    *feat = nullptr;
 
     bool dlss_on   = true;
+    // Rows of padding under every texture: the allocation is taller than the
+    // contract, as a game padded for dynamic resolution allocates. The contract
+    // and the presented region stay the top rw x rh / out_w x out_h.
+    UINT pad = 0;
     bool transpose = false;
     bool stale = false;
     Omit omit      = OMIT_NONE;
@@ -259,14 +263,14 @@ static bool Rebuild(Host &h, const char *why)
     printf("  rebuild (%s): %ux%u -> %ux%u, quality %d, hdr %d\n",
            why, h.rw, h.rh, h.out_w, h.out_h, h.quality, h.hdr ? 1 : 0);
 
-    if (!MakeTex(h.dev, &h.color, h.rw, h.rh, DXGI_FORMAT_R16G16B16A16_FLOAT,
+    if (!MakeTex(h.dev, &h.color, h.rw, h.rh + h.pad, DXGI_FORMAT_R16G16B16A16_FLOAT,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET) ||
-        !MakeTex(h.dev, &h.mv, h.rw, h.rh, DXGI_FORMAT_R16G16_FLOAT,
+        !MakeTex(h.dev, &h.mv, h.rw, h.rh + h.pad, DXGI_FORMAT_R16G16_FLOAT,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET) ||
-        !MakeTex(h.dev, &h.depth, h.rw, h.rh, DXGI_FORMAT_R32_TYPELESS,
+        !MakeTex(h.dev, &h.depth, h.rw, h.rh + h.pad, DXGI_FORMAT_R32_TYPELESS,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_DEPTH_STENCIL,
                  DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_D32_FLOAT) ||
-        !MakeTex(h.dev, &h.output, h.out_w, h.out_h, h.display_fmt,
+        !MakeTex(h.dev, &h.output, h.out_w, h.out_h + h.pad, h.display_fmt,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS))
     { printf("FAIL: textures\n"); return false; }
 
@@ -618,7 +622,10 @@ static bool RenderFrame(Host &h)
         // indistinguishable from a bridge that has stopped.
         if (h.dlss_on && h.feat != nullptr)
         {
-            h.ctx->CopyResource(bb, h.output.tex);
+            // The region, not the resource: with padding the output allocation
+            // is taller than the back buffer.
+            D3D11_BOX box = { 0, 0, 0, h.out_w, h.out_h, 1 };
+            h.ctx->CopySubresourceRegion(bb, 0, 0, 0, 0, h.output.tex, 0, &box);
         }
         else
         {
@@ -871,6 +878,11 @@ int main(int argc, char **argv)
         case STEP_DEPTHCOLOR:
             printf("FAIL: depthcolor is not implemented on the D3D11 host\n");
             rc = 4;
+            break;
+        case STEP_PAD:
+            printf("[%d/%d] pad %d rows\n", s + 1, sc.count, st.a);
+            h.pad = static_cast<UINT>(st.a < 0 ? 0 : st.a);
+            if (!Rebuild(h, "pad")) rc = 4;
             break;
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));

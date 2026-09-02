@@ -91,6 +91,7 @@ A scenario is a text file of verbs in `scenarios\`, one per line:
 | `scrgb on\|off` | scRGB HDR: float swapchain, linear colour space, the scene scaled to 640 nits, IsHDR set. D3D11 host only |
 | `sdr on\|off` | 8-bit SDR: `R8G8B8A8`, sRGB colour space. D3D11 host only |
 | `depthcolor on\|off` | hand NGX the depth as an `R32_SFLOAT` colour image, as RTX Remix does. Vulkan host only |
+| `pad N` | allocate every texture N rows taller than the contract, as a game padded for dynamic resolution does. D3D11 host only |
 | `exposure on\|off` | supply an ExposureTexture |
 | `transpose on\|off` | declare the contract the wrong way round |
 | `stale on\|off` | evaluate with another feature's four scalars |

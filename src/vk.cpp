@@ -1112,6 +1112,10 @@ int main(int argc, char **argv)
             printf("FAIL: scrgb is not implemented on the Vulkan host\n");
             rc = 4;
             break;
+        case STEP_PAD:
+            printf("FAIL: pad is not implemented on the Vulkan host\n");
+            rc = 4;
+            break;
         case STEP_DEPTHCOLOR:
             // Which image NGX is handed as Depth. The feature is rebuilt so the
             // bridge sees the change at a create, as a game switching would.
