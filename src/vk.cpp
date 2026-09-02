@@ -1100,6 +1100,10 @@ int main(int argc, char **argv)
             printf("FAIL: sdr is not implemented on the Vulkan host\n");
             rc = 4;
             break;
+        case STEP_SCRGB:
+            printf("FAIL: scrgb is not implemented on the Vulkan host\n");
+            rc = 4;
+            break;
         case STEP_EXPOSURE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.exposure_on = st.a != 0;

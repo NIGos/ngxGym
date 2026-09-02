@@ -50,7 +50,19 @@ cbuffer C : register(b0)
     float2 jitter;
     float2 inv_render;
     float2 mv_texel;
+    float2 hdr;        // x: linear gain on the scene, y: 1 to PQ-encode (HDR10)
+    float2 pad;
 };
+
+// ST.2084 OETF, nits in, code value out. The HDR10 swapchain is expected to hold
+// this, not linear light; a host that wrote linear 0..1 into it was presenting
+// a dim SDR picture under an HDR label.
+float3 pq(float3 nits)
+{
+    const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+    float3 y = pow(saturate(nits / 10000.0), m1);
+    return pow((c1 + c2 * y) / (1.0 + c3 * y), m2);
+}
 
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 
@@ -82,14 +94,16 @@ PSOut ps(VSOut i)
     float2 p = i.uv / inv_render + pan;
     float  chk = step(0.5, frac(floor(p.x / 24.0) * 0.5 + floor(p.y / 24.0) * 0.5));
     float  n   = noise(p * 0.08) * 0.6 + noise(p * 0.31) * 0.3;
-    o.color = float4(saturate(float3(chk * 0.8 + n, n, 1.0 - chk * 0.6) * 1.4), 1);
+    float3 c = saturate(float3(chk * 0.8 + n, n, 1.0 - chk * 0.6) * 1.4) * hdr.x;
+    if (hdr.y > 0.5) c = pq(c);
+    o.color = float4(c, 1);
     o.mv    = mv_texel;
     o.depth = saturate(0.2 + 0.6 * i.uv.y);
     return o;
 }
 )";
 
-struct CB { float pan[2]; float jitter[2]; float inv_render[2]; float mv_texel[2]; };
+struct CB { float pan[2]; float jitter[2]; float inv_render[2]; float mv_texel[2]; float hdr[2]; float pad[2]; };
 
 struct Tex
 {
@@ -119,6 +133,11 @@ struct Host
     UINT out_w = 1920, out_h = 1080, rw = 0, rh = 0;
     int  quality = NVSDK_NGX_PerfQuality_Value_MaxQuality;
     bool hdr = false;
+    // What the scene is multiplied by before it is written, and whether it is
+    // PQ-encoded. 1 and off for SDR and plain float; scRGB scales linear light
+    // (1.0 = 80 nits) and HDR10 encodes nits.
+    float scene_gain = 1.0f;
+    bool  scene_pq   = false;
     Mode mode = MODE_WINDOWED;
     DXGI_FORMAT display_fmt = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
@@ -390,15 +409,37 @@ static bool ApplyDisplay(Host &h, DXGI_FORMAT fmt, DXGI_COLOR_SPACE_TYPE space, 
     }
     return true;
 }
+// Off, for every mode, is the host's default: float, gamma 2.2 colour space,
+// scene as is. The three on-modes are the three presentations a game has:
+//   hdr    HDR10: R10G10B10A2, PQ colour space, scene in nits (0..1000) PQ-encoded, IsHDR
+//   scrgb  scRGB: float, linear colour space, scene x8 (1.0 = 80 nits, so up to 640), IsHDR
+//   sdr    8-bit sRGB, scene as is
+static bool ApplyOff(Host &h, const char *why)
+{
+    h.scene_gain = 1.0f; h.scene_pq = false;
+    h.display_fmt = DXGI_FORMAT_UNKNOWN;
+    return ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, why);
+}
 static bool ApplyHdr(Host &h, bool on)
 {
-    return on ? ApplyDisplay(h, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, true, "hdr on")
-              : ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "hdr off");
+    if (!on) return ApplyOff(h, "hdr off");
+    h.scene_gain = 1000.0f; h.scene_pq = true;
+    return ApplyDisplay(h, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, true, "hdr on");
 }
 static bool ApplySdr(Host &h, bool on)
 {
-    return on ? ApplyDisplay(h, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "sdr on")
-              : ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "sdr off");
+    if (!on) return ApplyOff(h, "sdr off");
+    h.scene_gain = 1.0f; h.scene_pq = false;
+    return ApplyDisplay(h, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, false, "sdr on");
+}
+static bool ApplyScrgb(Host &h, bool on)
+{
+    if (!on) return ApplyOff(h, "scrgb off");
+    h.scene_gain = 8.0f; h.scene_pq = false;
+    // Same format as off, so ApplyDisplay's "unchanged" shortcut would skip the
+    // colour space and the flag; force the resize by clearing the format first.
+    h.display_fmt = DXGI_FORMAT_UNKNOWN;
+    return ApplyDisplay(h, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, true, "scrgb on");
 }
 
 static bool RenderFrame(Host &h)
@@ -413,6 +454,7 @@ static bool RenderFrame(Host &h)
     if (SUCCEEDED(h.ctx->Map(h.cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)))
     {
         CB c = {};
+        c.hdr[0] = h.scene_gain; c.hdr[1] = h.scene_pq ? 1.0f : 0.0f;
         c.pan[0] = panx; c.pan[1] = pany;
         c.jitter[0] = 2.0f * jx / static_cast<float>(h.rw);
         c.jitter[1] = -2.0f * jy / static_cast<float>(h.rh);
@@ -821,6 +863,10 @@ int main(int argc, char **argv)
         case STEP_SDR:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             if (!ApplySdr(h, st.a != 0)) rc = 4;
+            break;
+        case STEP_SCRGB:
+            printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
+            if (!ApplyScrgb(h, st.a != 0)) rc = 4;
             break;
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));

@@ -1,10 +1,13 @@
-# Does the DLSS 5 add-on keep the picture at its brightness, on each swapchain
-# a game presents? Three feature builds -- scRGB float, HDR10, 8-bit SDR -- and
+# Does the DLSS 5 add-on keep the picture at its brightness, on each
+# presentation a game has? Four feature builds -- plain float, scRGB HDR (linear,
+# scene up to 640 nits, IsHDR), HDR10 (PQ-encoded nits, IsHDR), 8-bit SDR -- and
 # the bridge reads its output back 60 frames into each and logs the mean per
-# channel. The suite runs this twice, with and without the add-on, and fails a
-# luma ratio outside [0.5, 2]. Assassin's Creed Odyssey in HDR came back
-# overexposed with the neural pass on and correct with it off (#10); this is
-# the measurement that report lacked.
+# channel with the create flags. The suite runs this twice, with and without
+# the add-on, and fails a luma ratio outside [0.5, 2] for any of the four.
+# Assassin's Creed Odyssey in HDR came back overexposed with the neural pass
+# on and correct with it off (#10); the scRGB build is that case.
+frames 120
+scrgb on
 frames 120
 hdr on
 frames 120

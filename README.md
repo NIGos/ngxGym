@@ -87,8 +87,9 @@ A scenario is a text file of verbs in `scenarios\`, one per line:
 | `recreate` | create the feature again at an unchanged shape |
 | `dlss on\|off` | stop and restart calling DLSS. Off, no feature is created on a mode change either |
 | `nodlss` | never initialise NGX or create a feature: a game without DLSS. Render sizes then follow the published DLSS ratios |
-| `hdr on\|off` | HDR10 swapchain (`R10G10B10A2`, PQ) and the IsHDR create flag; off is scRGB float |
-| `sdr on\|off` | 8-bit SDR swapchain (`R8G8B8A8`, sRGB). D3D11 host only |
+| `hdr on\|off` | HDR10: `R10G10B10A2`, PQ colour space, the scene PQ-encoded as nits up to 1000, IsHDR set. Off is the default float swapchain |
+| `scrgb on\|off` | scRGB HDR: float swapchain, linear colour space, the scene scaled to 640 nits, IsHDR set. D3D11 host only |
+| `sdr on\|off` | 8-bit SDR: `R8G8B8A8`, sRGB colour space. D3D11 host only |
 | `exposure on\|off` | supply an ExposureTexture |
 | `transpose on\|off` | declare the contract the wrong way round |
 | `stale on\|off` | evaluate with another feature's four scalars |
@@ -122,11 +123,13 @@ The suite adds one check that measures the neighbour rather than the add-on:
 add-on's own output hash must differ. It exists because a build of that add-on
 reported active and wrote nothing, and nothing else here could tell.
 
-A second one measures brightness: `brightness` builds the feature on three
-swapchains in turn, scRGB float, HDR10 and 8-bit SDR, and the add-on logs the
-mean of its output per channel 60 frames into each. With and without the DLSS
-5 add-on, per format, the luma ratio has to stay within [0.5, 2]. A neural pass
-that overexposes an HDR frame fails here and nowhere else.
+A second one measures brightness: `brightness` builds the feature on the four
+presentations a game has, plain float, scRGB HDR, HDR10 and 8-bit SDR, and the
+add-on logs the mean of its output per channel 60 frames into each. With and
+without the DLSS 5 add-on, per presentation, the luma ratio has to stay within
+[0.5, 2]. A neural pass that overexposes an HDR frame fails here and nowhere
+else. The HDR10 means are PQ code values, not nits; the ratio is still the
+same direction.
 
 ## Layout
 
