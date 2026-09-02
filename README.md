@@ -11,7 +11,7 @@ takes seconds and ends in a verdict read from the add-on's own log.
 If it is useful to you, you can help cover the AI tooling used in its
 development:
 
-[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/giovanninigro)
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/nigos)
 
 ## Requirements
 
