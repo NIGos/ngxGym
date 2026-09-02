@@ -9,7 +9,9 @@ feature recreation, DLSS switched off and on, malformed parameter blocks. A run
 takes seconds and ends in a verdict read from the add-on's own log.
 
 If it is useful to you, you can help cover the AI tooling used in its
-development: **[ko-fi.com/giovanninigro](https://ko-fi.com/giovanninigro)**.
+development:
+
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/giovanninigro)
 
 ## Requirements
 
