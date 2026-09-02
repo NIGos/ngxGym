@@ -108,6 +108,7 @@ Directives in comments:
 | `# nofast` | run in full under `-Fast` |
 | `# d3d11-only` | the suite skips the scenario on the Vulkan host |
 | `# vk-only` | the suite skips the scenario on the D3D11 host |
+| `# proxy: d3d11\|dxgi\|d3d12` | the name ReShade is staged under for this scenario; `d3d12` is the arrangement of a D3D11 game that imports d3d12.dll |
 
 A verb the parser accepts and the executor drops fails the run rather than
 passing it.

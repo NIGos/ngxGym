@@ -726,6 +726,20 @@ int main(int argc, char **argv)
     // conclusion this file's author reached once already.
     setvbuf(stdout, nullptr, _IONBF, 0);
 
+    // A d3d12.dll beside this host is loaded first, by name. This host never
+    // uses D3D12 itself; the file is ReShade under that name, which is how one
+    // D3D11 title (Arknights: Endfield, dlss5-bridge #17) carries it: the game
+    // imports d3d12.dll, ReShade arrives as that proxy and hooks D3D11 late.
+    // Without this load nothing would pull that file in and ReShade would never
+    // attach. The runner stages it with -Proxy d3d12.
+    {
+        wchar_t p12[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, p12, MAX_PATH);
+        if (wchar_t *e = wcsrchr(p12, L'\\')) wcscpy_s(e + 1, MAX_PATH - (e + 1 - p12), L"d3d12.dll");
+        if (GetFileAttributesW(p12) != INVALID_FILE_ATTRIBUTES)
+            printf("d3d12.dll beside this host: %s\n", LoadLibraryW(p12) != nullptr ? "loaded first, as the game would" : "LoadLibrary FAILED");
+    }
+
     Scenario sc = {};
     if (argc > 1 && strstr(argv[1], ".txt") != nullptr)
     {

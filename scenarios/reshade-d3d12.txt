@@ -1,0 +1,11 @@
+# ReShade loaded as d3d12.dll in a D3D11 game, which is how Arknights: Endfield
+# carries it (dlss5-bridge #17): the game imports d3d12.dll, ReShade arrives as
+# that proxy and hooks D3D11 late, and the bridge's private D3D12 device is
+# created through ReShade itself. There the proxy has to stay on the device
+# whatever the neural add-on's build, and the bridge says so.
+frames 300
+
+# d3d11-only
+# proxy: d3d12
+
+# expect: ReShade is loaded as d3d12.dll

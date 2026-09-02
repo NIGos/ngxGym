@@ -30,7 +30,7 @@ param(
     [string] $Shade    = 'C:\ProgramData\ReShade\ReShade64.dll',
     # The name ReShade is staged under: d3d11 on Windows, dxgi under Proton,
     # where the prefix's d3d11 is DXVK and ReShade sits in front of DXGI.
-    [ValidateSet('d3d11','dxgi')] [string] $Proxy = 'd3d11',
+    [ValidateSet('d3d11','dxgi','d3d12')] [string] $Proxy = 'd3d11',
     # A command to start the host through -- 'umu-run' under Proton. Sets the
     # DLL override the proxy needs. Empty on Windows.
     [string] $Launcher = '',
@@ -84,6 +84,10 @@ Copy-Item $addon $run
 # Named d3d11.dll, because that is the proxy ReShade needs to wrap the device a
 # D3D11 add-on subscribes to. If phase 0 registers but sees no device events, try
 # dxgi.dll instead -- one line here, not a redesign.
+# "# proxy: d3d12" in a scenario stages ReShade under that name instead: the
+# arrangement one D3D11 title carries (Arknights: Endfield, dlss5-bridge #17),
+# where the game imports d3d12.dll and ReShade arrives as that proxy.
+if ($Scenario) { $sp = Join-Path $root "scenarios/$Scenario.txt"; if (Test-Path $sp) { $pm = Select-String -Path $sp -Pattern '^#\s*proxy:\s*(d3d11|dxgi|d3d12)' | Select-Object -First 1; if ($pm) { $Proxy = $pm.Matches[0].Groups[1].Value } } }
 Copy-Item $shade (Join-Path $run "$Proxy.dll")
 if (-not $NoSnippet) {
     # Resolved once and guarded. Split-Path throws on a path whose drive does not
