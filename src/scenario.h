@@ -57,6 +57,9 @@ struct Scenario
     Step steps[64];
     int  count = 0;
     char name[64] = "inline";
+    // "nodlss": the host never creates an NGX feature. A game that has no DLSS
+    // at all, which is the case the substitute contract's pre-arm path is for.
+    bool nodlss = false;
 };
 
 inline bool ScenarioAdd(Scenario *s, StepKind k, int a = 0, int b = 0)
@@ -110,6 +113,8 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
             ScenarioAdd(s, STEP_TRANSPOSE, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "stale") == 0 && n >= 2)
             ScenarioAdd(s, STEP_STALE, _stricmp(a1, "on") == 0 ? 1 : 0);
+        else if (_stricmp(verb, "nodlss") == 0)
+            s->nodlss = true;
         else if (_stricmp(verb, "exposure") == 0 && n >= 2)
             ScenarioAdd(s, STEP_EXPOSURE, _stricmp(a1, "on") == 0 ? 1 : 0);
         else if (_stricmp(verb, "omit") == 0 && n >= 2)

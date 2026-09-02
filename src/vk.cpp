@@ -363,6 +363,13 @@ static bool Rebuild(Host &h, const char *why)
     if (h.omit != OMIT_FLAGS) SetU(&cc.create_flags, HostFlags(h));
     SetU(&cc.output_subrects, 0);
 
+    // A game whose DLSS is off creates no feature on a mode change, and one that
+    // never had DLSS creates none at all. The bridge counts creates: one here
+    // while the substitute contract holds the session reads as "the game has
+    // already used DLSS itself" and refuses the re-arm, which is not what a game
+    // with DLSS off does.
+    if (!h.dlss_on) { printf("  no feature: dlss is off\n"); return true; }
+
     h.p->Reset();
     ApplyCreate(h.p, cc);
 
@@ -441,7 +448,8 @@ static bool RenderFrame(Host &h)
     pc.mv_texel[1] = kVelY / mvsy;
     vkCmdPushConstants(h.cmd, h.play, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pc), &pc);
-    vkCmdDraw(h.cmd, 3, 1, 0, 0);
+    // Nine draws, not one: see the D3D11 host's draw loop for why.
+    for (int i = 0; i < 9; ++i) vkCmdDraw(h.cmd, 3, 1, 0, 0);
     vkCmdEndRendering(h.cmd);
 
     if (h.dlss_on && h.feat != nullptr)
@@ -991,6 +999,7 @@ int main(int argc, char **argv)
     ShowHostWindow(h.hwnd);
 
     if (!Setup(h)) return 3;
+    h.dlss_on = !sc.nodlss;
     if (!Rebuild(h, "start")) return 3;
 
     // How many frames the scenario asks for, so a run that ends early is a failure
@@ -1020,6 +1029,8 @@ int main(int argc, char **argv)
         case STEP_DLSS:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.dlss_on = st.a != 0;
+            // Back on after a rebuild that skipped the create: build one now.
+            if (h.dlss_on && h.feat == nullptr && !Rebuild(h, "dlss on")) rc = 4;
             break;
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));

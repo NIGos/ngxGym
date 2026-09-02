@@ -75,6 +75,23 @@ the add-on replaces a settings file from another version with its defaults at
 attach and that would drop every `# cfg:` line. A line starting `# cfg-old-file`
 leaves the stamp off, which is how `regen` tests the replacement itself.
 
+A line `nodlss` makes the host create no NGX feature at all: a game that never
+had DLSS, which is the substitute contract's pre-arm case. With `dlss off` the
+host also creates no feature on a mode change, as a game with DLSS switched off
+does not; the bridge counts creates, and one there reads as the game still
+having DLSS.
+
+**The substitute contract arms in this gym**, on both backends, since
+2026-09-02. Two things had to be true that were not. ReShade's generic depth
+add-on ignores a frame in which the only depth-stencil received eight draw calls
+or fewer, and skips a depth-stencil that drew three vertices or fewer; the host
+drew one fullscreen triangle, so no depth buffer was ever selected and the DEPTH
+semantic never bound. The host now draws that triangle nine times. And the
+contract is DLAA at back-buffer size, so a scenario that wants it starts with
+`preset 5`. `synth-modes` and `synth-nodlss-modes` are the two cases across
+display-mode changes; with the Vulkan optical-flow teardown of 1.4.0 put back,
+`synth-modes` fails on Vulkan the way Baldur's Gate 3 did.
+
 A line starting `# expect:` names something the add-on's log must contain for
 the run to pass. `# expect-d3d11:` and `# expect-vk:` do the same for one
 backend, which is what the two logs word differently.

@@ -257,6 +257,13 @@ static bool Rebuild(Host &h, const char *why)
     SetU(&cc.output_subrects, 0);
     SetU(&cc.node_mask_creation, 1); SetU(&cc.node_mask_visibility, 1);
 
+    // A game whose DLSS is off creates no feature on a mode change, and one that
+    // never had DLSS creates none at all. The bridge counts creates: one here
+    // while the substitute contract holds the session reads as "the game has
+    // already used DLSS itself" and refuses the re-arm, which is not what a game
+    // with DLSS off does.
+    if (!h.dlss_on) { printf("  no feature: dlss is off\n"); return true; }
+
     h.p->Reset();
     ApplyCreate(h.p, cc);
     const NVSDK_NGX_Result r =
@@ -411,7 +418,16 @@ static bool RenderFrame(Host &h)
     h.ctx->PSSetShader(h.ps, nullptr, 0);
     h.ctx->VSSetConstantBuffers(0, 1, &h.cb);
     h.ctx->PSSetConstantBuffers(0, 1, &h.cb);
-    h.ctx->Draw(3, 0);
+    // Nine identical draws of the one triangle, on purpose. ReShade's generic
+    // depth add-on (examples/09-depth/generic_depth_addon.cpp) does not count a
+    // frame in which the only depth-stencil received 8 draw calls or fewer -- a
+    // special case for emulators that present more often than they render -- and
+    // it skips a depth-stencil whose frame drew 3 vertices or fewer as unused.
+    // One fullscreen triangle is exactly one draw of three vertices, so no depth
+    // buffer was ever selected here, the DEPTH semantic never bound, and the
+    // substitute contract could not arm in this gym at all. The extra draws
+    // write the same pixels at the same depth; the picture does not change.
+    for (int i = 0; i < 9; ++i) h.ctx->Draw(3, 0);
     ID3D11RenderTargetView *none[2] = { nullptr, nullptr };
     h.ctx->OMSetRenderTargets(2, none, nullptr);
 
@@ -689,6 +705,7 @@ int main(int argc, char **argv)
     dsd.DepthFunc = D3D11_COMPARISON_ALWAYS;
     h.dev->CreateDepthStencilState(&dsd, &h.dss);
 
+    h.dlss_on = !sc.nodlss;
     if (!Rebuild(h, "start")) return 3;
 
     // How many frames the scenario asks for, so a run that ends early is a failure
@@ -732,6 +749,8 @@ int main(int argc, char **argv)
         case STEP_DLSS:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.dlss_on = st.a != 0;
+            // Back on after a rebuild that skipped the create: build one now.
+            if (h.dlss_on && h.feat == nullptr && !Rebuild(h, "dlss on")) rc = 4;
             break;
         case STEP_HDR:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));

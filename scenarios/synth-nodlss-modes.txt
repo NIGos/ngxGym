@@ -1,0 +1,17 @@
+# The substitute contract in a game that never had DLSS, across display-mode
+# changes. The host creates no NGX feature at all, so the contract arms on the
+# pre-arm path -- no create and no evaluate since this add-on started -- and
+# has to come back after every runtime teardown the mode changes cause.
+nodlss
+preset 5
+frames 1500
+mode borderless
+frames 1500
+mode windowed
+frames 1500
+
+# nofast
+# cfg: synth=1
+
+# expect: [synth] arming
+# expect-after: created an effect runtime :: frames delivered so far

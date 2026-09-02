@@ -1,0 +1,25 @@
+# The substitute contract across display-mode changes. ReShade destroys and
+# recreates its effect runtime on every swapchain change, and on Vulkan that
+# tears down the transport and the optical flow session with it; both have to
+# come back on their own. On 2026-09-02 Baldur's Gate 3 on Vulkan did not: the
+# engine's one-shot guard was left standing by the teardown and the contract
+# never found a motion source again, while D3D11 was unaffected.
+#
+# DLAA preset first so the depth buffer is back-buffer sized, then the game
+# switches its DLSS off and the contract arms. Each mode change is followed by
+# enough frames for two delivered-count lines, which is what the runner needs
+# to see the count still rising after the last runtime teardown.
+preset 5
+frames 120
+dlss off
+frames 1500
+mode borderless
+frames 1500
+mode windowed
+frames 1500
+
+# nofast
+# cfg: synth=1
+
+# expect: [synth] arming
+# expect-after: created an effect runtime :: frames delivered so far

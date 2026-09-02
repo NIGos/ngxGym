@@ -245,30 +245,62 @@ if ($stood.Success) {
     ($txt -split "`n" | Select-String -Pattern 'does nothing for the rest' -Context 2,0) | Select-Object -First 1
     exit 1
 }
-if ($built.Count -eq 0) {
-    Write-Host "FAIL: the mirror never built a D3D12 feature. It attached and did nothing." -ForegroundColor Red
-    exit 1
-}
-if ($recorded.Count -eq 0) {
-    Write-Host "FAIL: a feature was built but no frame was ever recorded into the game's command buffer." -ForegroundColor Red
-    exit 1
-}
-
-# ReShade destroys and recreates its effect runtime on every swapchain change, so
-# a scenario with display steps tears the mirror down once per step. Each teardown
-# has to be followed by a build, or the mirror recovered in name only.
+# Which source held the session decides which shape the verdict takes. The
+# substitute contract logs none of the mirror's lines -- no import build, no
+# re-arm -- so a run it carried used to fail here as "the mirror never built a
+# feature". It has its own evidence: the cumulative delivered count, which every
+# source writes every 600 frames, and which the check further down requires to
+# keep rising after the last runtime teardown.
+$synth = $txt -match '\[synth\] arming'
 $down = [regex]::Matches($txt, 'the game is destroying the effect runtime')
 $rearm = [regex]::Matches($txt, 'the mirror is armed again')
-if ($down.Count -gt 1 -and $rearm.Count -lt ($down.Count - 1)) {
-    Write-Host ("FAIL: {0} runtime teardown(s) but only {1} re-arm(s) -- the mirror did not come back." -f $down.Count, $rearm.Count) -ForegroundColor Red
-    exit 1
-}
-if ($rearm.Count -gt 0 -and $built.Count -lt ($rearm.Count + 1)) {
-    Write-Host ("FAIL: {0} re-arm(s) but only {1} build(s) -- it re-armed and never rebuilt." -f $rearm.Count, $built.Count) -ForegroundColor Red
-    exit 1
+if ($synth) {
+    if (([regex]::Matches($txt, 'frames delivered so far')).Count -eq 0) {
+        Write-Host "FAIL: the substitute contract armed and never reached 600 delivered frames." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    if ($built.Count -eq 0) {
+        Write-Host "FAIL: the mirror never built a D3D12 feature. It attached and did nothing." -ForegroundColor Red
+        exit 1
+    }
+    if ($recorded.Count -eq 0) {
+        Write-Host "FAIL: a feature was built but no frame was ever recorded into the game's command buffer." -ForegroundColor Red
+        exit 1
+    }
+
+    # ReShade destroys and recreates its effect runtime on every swapchain change, so
+    # a scenario with display steps tears the mirror down once per step. Each teardown
+    # has to be followed by a build, or the mirror recovered in name only.
+    if ($down.Count -gt 1 -and $rearm.Count -lt ($down.Count - 1)) {
+        Write-Host ("FAIL: {0} runtime teardown(s) but only {1} re-arm(s) -- the mirror did not come back." -f $down.Count, $rearm.Count) -ForegroundColor Red
+        exit 1
+    }
+    if ($rearm.Count -gt 0 -and $built.Count -lt ($rearm.Count + 1)) {
+        Write-Host ("FAIL: {0} re-arm(s) but only {1} build(s) -- it re-armed and never rebuilt." -f $rearm.Count, $built.Count) -ForegroundColor Red
+        exit 1
+    }
 }
 
 # What this particular scenario says its own log must contain. Opt-in, as on the
+# Did whatever was delivering keep delivering after the LAST runtime teardown?
+# The mirror counter above is sampled first-to-last over the whole run, so a
+# source that delivered for a thousand frames and then stopped at the first
+# mode change still shows movement. The add-on logs a cumulative delivered count
+# every 600 frames from every source, mirror or substitute; if the log has a
+# runtime being recreated, the samples after the last recreation must rise.
+# Fewer than two samples after it means the tail was too short to say, and the
+# run stays covered by the gates above -- give the scenario a longer tail.
+$lastRt = $txt.LastIndexOf('created an effect runtime on')
+if ($lastRt -ge 0) {
+    $after = [regex]::Matches($txt.Substring($lastRt), '(\d+) frames delivered so far')
+    if ($after.Count -ge 2 -and
+        [int]$after[$after.Count-1].Groups[1].Value -le [int]$after[0].Groups[1].Value) {
+        Write-Host "FAIL: delivery stopped after the last runtime teardown ($($after[0].Groups[1].Value) -> $($after[$after.Count-1].Groups[1].Value) over $($after.Count) samples)." -ForegroundColor Red
+        exit 1
+    }
+}
+
 # D3D11 side: a scenario with no "# expect:" line is unaffected.
 if ($Scenario -and (Test-Path $scfile)) {
     foreach ($e in (Select-String -Path $scfile -Pattern '^#\s*expect(-vk)?:\s*(.+)$')) {
@@ -278,6 +310,21 @@ if ($Scenario -and (Test-Path $scfile)) {
             exit 1
         }
         Write-Host "  expect ok: $want" -ForegroundColor DarkGray
+    }
+    # "# expect-after: A :: B": some B after the LAST A. What "# expect:" cannot
+    # say -- that a thing happened again after a teardown, not only before it.
+    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect-after:\s*(.+?)\s*::\s*(.+)$')) {
+        $a = $m.Matches[0].Groups[1].Value.Trim(); $b = $m.Matches[0].Groups[2].Value.Trim()
+        $ia = $txt.LastIndexOf($a)
+        if ($ia -lt 0) {
+            Write-Host "FAIL: the scenario expects '$b' after '$a', and '$a' is not in the log at all." -ForegroundColor Red
+            exit 1
+        }
+        if ($txt.IndexOf($b, $ia) -lt 0) {
+            Write-Host "FAIL: the scenario expects '$b' after the last '$a', and it is not there." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  expect ok: $b after the last $a" -ForegroundColor DarkGray
     }
 }
 

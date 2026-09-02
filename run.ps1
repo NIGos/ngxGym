@@ -311,6 +311,24 @@ if ($mir.Count -ge 2 -and
     exit 1
 }
 
+# Did whatever was delivering keep delivering after the LAST runtime teardown?
+# The mirror counter above is sampled first-to-last over the whole run, so a
+# source that delivered for a thousand frames and then stopped at the first
+# mode change still shows movement. The add-on logs a cumulative delivered count
+# every 600 frames from every source, mirror or substitute; if the log has a
+# runtime being recreated, the samples after the last recreation must rise.
+# Fewer than two samples after it means the tail was too short to say, and the
+# run stays covered by the gates above -- give the scenario a longer tail.
+$lastRt = $txt.LastIndexOf('created an effect runtime on')
+if ($lastRt -ge 0) {
+    $after = [regex]::Matches($txt.Substring($lastRt), '(\d+) frames delivered so far')
+    if ($after.Count -ge 2 -and
+        [int]$after[$after.Count-1].Groups[1].Value -le [int]$after[0].Groups[1].Value) {
+        Write-Host "FAIL: delivery stopped after the last runtime teardown ($($after[0].Groups[1].Value) -> $($after[$after.Count-1].Groups[1].Value) over $($after.Count) samples)." -ForegroundColor Red
+        exit 1
+    }
+}
+
 # What this particular scenario says its own log must contain. Opt-in: a scenario
 # with no "# expect:" line is unaffected, and a scenario that has one states the
 # thing it exists to prove instead of leaving it to a reader.
@@ -325,6 +343,21 @@ if (Test-Path $scfile) {
             exit 1
         }
         Write-Host "  expect ok: $e" -ForegroundColor DarkGray
+    }
+    # "# expect-after: A :: B": some B after the LAST A. What "# expect:" cannot
+    # say -- that a thing happened again after a teardown, not only before it.
+    foreach ($m in (Select-String -Path $scfile -Pattern '^#\s*expect-after:\s*(.+?)\s*::\s*(.+)$')) {
+        $a = $m.Matches[0].Groups[1].Value.Trim(); $b = $m.Matches[0].Groups[2].Value.Trim()
+        $ia = $txt.LastIndexOf($a)
+        if ($ia -lt 0) {
+            Write-Host "FAIL: the scenario expects '$b' after '$a', and '$a' is not in the log at all." -ForegroundColor Red
+            exit 1
+        }
+        if ($txt.IndexOf($b, $ia) -lt 0) {
+            Write-Host "FAIL: the scenario expects '$b' after the last '$a', and it is not there." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  expect ok: $b after the last $a" -ForegroundColor DarkGray
     }
 }
 
