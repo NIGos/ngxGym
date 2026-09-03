@@ -148,7 +148,16 @@ else {
 if (-not $NoEffects) {
     Copy-Item (Join-Path $root 'reshade-fx') (Join-Path $run 'fx') -Recurse
     $effectLines = "EffectSearchPaths=.\fx`nTextureSearchPaths=.\fx"
-    $presetBody  = "[ngxGym_probe.fx]`n`nTechniques=ngxGym_probe@ngxGym_probe.fx`n"
+    # Techniques= at global scope, before any section: that is where ReShade
+    # reads it from and how it writes its own presets. Under a section header it
+    # did not take under Proton, no technique ran, and the source latch never
+    # released (dlss5-bridge #22).
+    # Under a launcher the motion-vector stub is enabled as well: the driver's
+    # optical flow does not open under Proton, and without a texMotionVectors
+    # provider the substitute contract cannot arm there.
+    $techs = 'ngxGym_probe@ngxGym_probe.fx'
+    if ($Launcher) { $techs += ',ngxGym_mv@ngxGym_mv.fx' }
+    $presetBody  = "Techniques=$techs`n"
 } else {
     $effectLines = ""
     $presetBody  = "Techniques=`n"

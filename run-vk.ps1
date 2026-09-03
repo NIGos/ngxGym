@@ -112,7 +112,7 @@ if (Test-Path $Snippet) {
 }
 
 Copy-Item (Join-Path $root 'reshade-fx') (Join-Path $run 'fx') -Recurse
-"[ngxGym_probe.fx]`n`nTechniques=ngxGym_probe@ngxGym_probe.fx`n" |
+"Techniques=ngxGym_probe@ngxGym_probe.fx`n" |
     Set-Content -Path (Join-Path $run 'default.ini') -Encoding ASCII
 @"
 [GENERAL]

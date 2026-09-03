@@ -58,11 +58,12 @@ neighbour add-on is one command: `.\vault.ps1 -Use <label> -To <folder>`.
 
 ### Under Proton
 
-Not tested here; written for a reporter on Linux, and reports are welcome. The
-D3D11 host is a plain Windows program and runs under umu/Proton; `run.ps1`
-runs under PowerShell for Linux (`pwsh`). ReShade goes in as `dxgi.dll` with a
-DLL override, the way it is installed in a Proton game, and the host is
-started through the launcher:
+Run there by a reporter on Linux (dlss5-bridge #22), whose notes this section
+follows. The D3D11 host is a plain Windows program and runs under umu/Proton;
+`run.ps1` runs under PowerShell for Linux (`pwsh`). The release binaries from
+v1.1.0 on carry every verb below; v1.0.0 predates several. ReShade goes in as
+`dxgi.dll` with a DLL override, the way it is installed in a Proton game, and
+the host is started through the launcher:
 
 ```
 pwsh ./run.ps1 -Scenario synth-nodlss-modes -Launcher umu-run -Proxy dxgi \
@@ -73,6 +74,20 @@ pwsh ./run.ps1 -Scenario synth-nodlss-modes -Launcher umu-run -Proxy dxgi \
 `-StageOnly` assembles the run folder and stops, for running the host by hand.
 The verdict reads the same log lines as on Windows. The Vulkan host needs
 ReShade's Vulkan layer inside the prefix and is not covered by the runner.
+
+Three things differ under Proton:
+
+- The driver's optical flow does not open there, so the substitute contract
+  needs a `texMotionVectors` provider. With `-Launcher` the runner enables
+  `ngxGym_mv.fx`, a zero-motion stub, alongside the probe.
+- The host renders the scene at several hundred frames per second, and the
+  substitute arms only after 10 s of quiet. Do not use `-Fast`, and raise the
+  `frames` counts of a synth scenario (6000 per step is known to work) if a
+  run ends before the arming line appears.
+- Wine's built-in `d3dcompiler_47` rejects `[fastopt]`, which motion-estimation
+  effects use. A native `d3dcompiler_47.dll` in the prefix with
+  `WINEDLLOVERRIDES=d3dcompiler_47=n,b` compiles them; the stub above needs
+  neither.
 
 ## Scenarios
 
@@ -86,7 +101,7 @@ A scenario is a text file of verbs in `scenarios\`, one per line:
 | `preset 0..5` | DLSS quality; the render size follows. `5` is DLAA |
 | `recreate` | create the feature again at an unchanged shape |
 | `dlss on\|off` | stop and restart calling DLSS. Off, no feature is created on a mode change either |
-| `nodlss` | never initialise NGX or create a feature: a game without DLSS. Render sizes then follow the published DLSS ratios |
+| `nodlss` | never initialise NGX or create a feature: a game without DLSS. The textures are output-sized |
 | `hdr on\|off` | HDR10: `R10G10B10A2`, PQ colour space, the scene PQ-encoded as nits up to 1000, IsHDR set. Off is the default float swapchain |
 | `scrgb on\|off [nits] [g22]` | scRGB HDR: float swapchain, linear colour space, IsHDR set, the scene's brightest pixel at `nits` (640 by default); `g22` leaves the gamma-2.2 colour space on the swapchain, as a game that never sets one does. D3D11 host only |
 | `sdr on\|off` | 8-bit SDR: `R8G8B8A8`, sRGB colour space. D3D11 host only |
