@@ -1,0 +1,22 @@
+# The substitute contract on an HDR10 presentation: the back buffer is
+# R10G10B10A2 with PQ code values in it. Before 2026-09-03 the bridge handed
+# that to the evaluate as SDR colour, and Baldur's Gate 3 came out dimmer and
+# less saturated than under its own DLSS. Now the D3D12 side decodes it to
+# linear BT.709 for the evaluate and encodes the result again, and the
+# contract says IsHDR.
+nodlss
+hdr on
+preset 5
+frames 1500
+mode borderless
+frames 1500
+
+# d3d11-only
+# nofast
+# cfg: synth=1
+# cfg: hash_out=1
+
+# expect: [synth] arming
+# expect: HDR10 PQ conversion ready
+# expect: contract HDR (IsHDR)
+# expect-after: created an effect runtime :: frames delivered so far
