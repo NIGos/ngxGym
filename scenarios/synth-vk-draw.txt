@@ -1,0 +1,21 @@
+# The substitute's result drawn into the back buffer through a render pass
+# rather than copied: what the Vulkan transport does for a swapchain the game
+# created without VK_IMAGE_USAGE_TRANSFER_DST_BIT (Ghost Recon Breakpoint,
+# dlss5-bridge #23). This host's swapchain can be copied into, so the draw is
+# asked for by name; the decision itself is one usage test in the add-on.
+nodlss
+preset 5
+frames 1500
+mode borderless
+frames 1500
+mode windowed
+frames 1500
+
+# vk-only
+# nofast
+# cfg: synth=1
+# cfg: vk_present=2
+
+# expect: [synth] arming
+# expect: present pass built
+# expect-after: created an effect runtime :: frames delivered so far
