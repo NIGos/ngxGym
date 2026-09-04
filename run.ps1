@@ -117,6 +117,23 @@ if (-not $NoSnippet) {
     if ($snipDir) {
         $nr = Join-Path $snipDir 'nvngx_dlssnr.dll'
         if (Test-Path $nr) { Copy-Item $nr $run }
+        # The NGX LOADER, when one is placed beside the snippets. NGX resolves
+        # _nvngx.dll by bare name, so a copy in the game folder wins over the
+        # driver store's. On 2026-09-04 NVIDIA 32.0.16.1664's loader gained
+        # first-class feature 18 -- its feature-id table names "dlssnr" where
+        # 1656 had an empty string -- and began routing that feature into
+        # nvngx_dlssnr.dll 310.8.0.0, which then faults inside D3D12's
+        # SetDescriptorHeaps on a heap handle that reads -1. The bridge's fault
+        # stack names the snippet, not the neighbouring add-on and not the
+        # bridge. 1656's loader does not take that route and the same run passes.
+        # Staging a loader is how this harness stays usable while that pair is
+        # broken. Deliberately opt-in: the file has to be put in snippets\ by
+        # hand, and every run that uses one says so.
+        $ld = Join-Path $snipDir '_nvngx.dll'
+        if (Test-Path $ld) {
+            Copy-Item $ld $run
+            Write-Host ("NGX loader staged from snippets: " + (Get-Item $ld).VersionInfo.FileVersion) -ForegroundColor DarkYellow
+        }
     }
 }
 
