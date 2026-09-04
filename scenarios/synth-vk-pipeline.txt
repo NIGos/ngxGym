@@ -1,7 +1,10 @@
 # The substitute contract on Vulkan with the transport pipelined, across display
 # mode changes. vk_sync=2 records the vkCmdWaitEvents on the pair the PREVIOUS
 # frame armed, and records it above the copies rather than below them, so the
-# game's queue is never stopped and the picture on screen is one present old.
+# wait the game's queue reaches is on an evaluate that started a frame ago and
+# the picture on screen is one present old. The queue can still stop there, and
+# in this host it does: it renders one frame at a time and waits on its own
+# fence, so there is nothing between two presents to overlap the evaluate with.
 # There is a second Output texture in that mode and only in that mode, and every
 # teardown and rebuild here has to make and drop it in step with the rest.
 #

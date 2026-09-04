@@ -1,0 +1,35 @@
+# The handover in the direction nothing else in either suite goes: the game's own
+# DLSS turned back ON after the substitute has armed, with the transport
+# pipelined. That is the one sequence where two threads want the private D3D12
+# session at once -- the substitute's worker is inside the evaluate under
+# g_ngx_cs while the game's evaluate detour takes g_bridge_cs and rebuilds the
+# shared session out from under it. Under vk_sync=0 the game's queue is parked
+# and the mirror's own vkDeviceWaitIdle cannot return until the worker is done,
+# which hid it; vk_sync=2 parks nothing for that long, so this is the scenario
+# that reaches it.
+#
+# synth-modes goes mirror -> substitute and stops there, and both pipelined
+# scenarios are nodlss, so before this one nothing turned the game's DLSS back on
+# with a substitute frame in flight.
+#
+# What it watches for: the substitute arming and pipelining, the mirror's rebuild
+# on the frame the game's own feature comes back -- which is the rebuild that has
+# to drain the substitute's worker first -- and frames still being delivered after
+# it. A rebuild that freed the worker's textures under it does not get that far.
+frames 120
+dlss off
+frames 1500
+dlss on
+frames 900
+dlss off
+frames 1500
+
+# vk-only
+# nofast
+# cfg: synth=1
+# cfg: vk_sync=2
+
+# expect: [synth] arming
+# expect: the Vulkan transport pipelines
+# expect: the game replaced its own feature
+# expect-after: the game replaced its own feature :: frames delivered so far
