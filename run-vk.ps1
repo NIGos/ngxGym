@@ -402,6 +402,14 @@ if ($Validate) {
     #                            now appear in synth-only Vulkan runs as well. See
     #                            the header of vkmirror.inc for why no arrangement
     #                            of these calls avoids them
+    #   vkResetEvent-03821    -- the pipeline, vk_sync=2 only: the worker
+    #                            host-RESETS an event a submitted command buffer
+    #                            waits on. The dependency the spec asks for is
+    #                            there and the layer cannot see it -- the worker
+    #                            resets only after the GPU signalled an event
+    #                            recorded later in that same buffer. Same category
+    #                            as the two above; measured 2026-09-04, and see
+    #                            "The pipeline" in synth.inc
     #
     # Anything else is new and printed as such.
     $known = @{
@@ -409,6 +417,7 @@ if ($Validate) {
         'VUID-vkQueueSubmit-pSignalSemaphores-00067' = 'ReShade layer'
         'VUID-vkSetEvent-event-09543'                = 'a park, inherent'
         'VUID-vkCmdWaitEvents-srcStageMask-01158'    = 'a park, inherent'
+        'VUID-vkResetEvent-event-03821'              = 'a pipeline, inherent'
     }
     $fresh = @($vuids | Where-Object { -not $known.ContainsKey($_.Name) })
     if ($fresh.Count -gt 0) {

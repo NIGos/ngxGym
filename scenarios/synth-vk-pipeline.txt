@@ -1,0 +1,31 @@
+# The substitute contract on Vulkan with the transport pipelined, across display
+# mode changes. vk_sync=2 records the vkCmdWaitEvents on the pair the PREVIOUS
+# frame armed, and records it above the copies rather than below them, so the
+# game's queue is never stopped and the picture on screen is one present old.
+# There is a second Output texture in that mode and only in that mode, and every
+# teardown and rebuild here has to make and drop it in step with the rest.
+#
+# The default is vk_sync=0, so nothing else in either suite reaches any of that:
+# not the second Output, not the second image import, not the worker's own event
+# resets, not the two-deep handover. This scenario is the only place they run.
+#
+# What it watches for is the same pair the other substitute scenarios watch --
+# the contract arming and frames delivered after each runtime teardown -- because
+# under the pipeline those are exactly what a mis-ordered event costs: a queue
+# stopped on an event nothing sets delivers nothing at all.
+nodlss
+preset 5
+frames 1500
+mode borderless
+frames 1500
+mode windowed
+frames 1500
+
+# vk-only
+# nofast
+# cfg: synth=1
+# cfg: vk_sync=2
+
+# expect: [synth] arming
+# expect: the Vulkan transport pipelines
+# expect-after: created an effect runtime :: frames delivered so far
