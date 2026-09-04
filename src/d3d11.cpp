@@ -727,6 +727,24 @@ int main(int argc, char **argv)
     // conclusion this file's author reached once already.
     setvbuf(stdout, nullptr, _IONBF, 0);
 
+    // An _nvngx.dll beside this host is loaded first, by name, before anything
+    // else can pull the driver store's copy in by absolute path. NGX resolves
+    // that file by bare name, so the executable's directory wins the search --
+    // but only for whoever asks first, and NVIDIA's own loader resolution finds
+    // the driver store through the registry. In the scenarios where the
+    // substitute contract arms ten seconds in, the driver store's copy was
+    // already mapped by then and the staged one lost. Loading it here settles
+    // the order. See the note beside the loader staging in run.ps1 for why a
+    // loader would be staged at all.
+    {
+        wchar_t pn[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, pn, MAX_PATH);
+        if (wchar_t *e = wcsrchr(pn, L'\\')) wcscpy_s(e + 1, MAX_PATH - (e + 1 - pn), L"_nvngx.dll");
+        if (GetFileAttributesW(pn) != INVALID_FILE_ATTRIBUTES)
+            printf("_nvngx.dll beside this host: %s\n",
+                   LoadLibraryW(pn) != nullptr ? "loaded first, so it wins the name" : "LoadLibrary FAILED");
+    }
+
     // A d3d12.dll beside this host is loaded first, by name. This host never
     // uses D3D12 itself; the file is ReShade under that name, which is how one
     // D3D11 title (Arknights: Endfield, dlss5-bridge #17) carries it: the game
