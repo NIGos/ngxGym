@@ -1,0 +1,29 @@
+# The substitute contract on Vulkan with the mirror switched off, across display
+# mode changes. vk_mirror=0 makes vkmirror.inc register nothing at all -- and its
+# destroy_effect_runtime handler was for a while the substitute's only teardown,
+# while the substitute itself registers either way. So every mode change here
+# destroys the VkDevice under a transport that owns a worker thread and four
+# VkEvents on it, which is the case the other Vulkan scenarios never reach
+# because they all run with the mirror registered.
+#
+# What it watches for is the substitute's own teardown line on each runtime
+# destroy, and the runner's own count of delivered frames after arming, which
+# is what a transport whose park outlived its device cannot reach: before this
+# was fixed the substitute delivered nothing at all after the first mode change.
+# The mirror's "created an effect runtime" line is not available as an anchor
+# here -- vk_mirror=0 is exactly the case where nothing in vkmirror.inc runs.
+nodlss
+preset 5
+frames 1500
+mode borderless
+frames 1500
+mode windowed
+frames 1500
+
+# vk-only
+# nofast
+# cfg: synth=1
+# cfg: vk_mirror=0
+
+# expect: [synth] arming
+# expect: the substitute's Vulkan transport stops
