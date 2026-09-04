@@ -394,17 +394,21 @@ if ($Validate) {
     #                            ReShade layer is disabled with
     #                            VK_LOADER_LAYERS_DISABLE=VK_LAYER_reshade, which
     #                            is how they were attributed
-    #   the two event ones    -- the mirror's park: a command buffer waits on an
-    #                            event a worker thread host-sets after the submit.
-    #                            See the header of vkmirror.inc for why no
-    #                            arrangement of these calls avoids them
+    #   the two event ones    -- a park: a command buffer waits on an event a
+    #                            worker thread host-sets after the submit. The
+    #                            mirror parks the game's own command buffer; since
+    #                            2026-09-04 the substitute's Vulkan transport parks
+    #                            ReShade's immediate one the same way, so these two
+    #                            now appear in synth-only Vulkan runs as well. See
+    #                            the header of vkmirror.inc for why no arrangement
+    #                            of these calls avoids them
     #
     # Anything else is new and printed as such.
     $known = @{
         'VUID-vkGetPrivateData-objectHandle-09498'   = 'ReShade layer'
         'VUID-vkQueueSubmit-pSignalSemaphores-00067' = 'ReShade layer'
-        'VUID-vkSetEvent-event-09543'                = "the mirror's park, inherent"
-        'VUID-vkCmdWaitEvents-srcStageMask-01158'    = "the mirror's park, inherent"
+        'VUID-vkSetEvent-event-09543'                = 'a park, inherent'
+        'VUID-vkCmdWaitEvents-srcStageMask-01158'    = 'a park, inherent'
     }
     $fresh = @($vuids | Where-Object { -not $known.ContainsKey($_.Name) })
     if ($fresh.Count -gt 0) {

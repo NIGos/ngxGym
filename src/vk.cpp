@@ -687,7 +687,21 @@ static bool MakeSwapchain(Host &h, const char *why)
     swci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swci.preTransform = caps.currentTransform;
     swci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    // IMMEDIATE where the surface offers it, FIFO otherwise. Not a preference:
+    // FIFO paces every step at the display's refresh rate, so a 1920x1080 step
+    // sat at 118 fps on a 120 Hz panel whatever the add-on cost per frame, and
+    // the step timing below could not measure a transport change at all. FIFO is
+    // the only mode the specification guarantees, so it stays as the fallback.
     swci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    {
+        uint32_t nmodes = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(h.phys, h.surf, &nmodes, nullptr);
+        std::vector<VkPresentModeKHR> modes(nmodes);
+        if (nmodes != 0)
+            vkGetPhysicalDeviceSurfacePresentModesKHR(h.phys, h.surf, &nmodes, modes.data());
+        for (VkPresentModeKHR m : modes)
+            if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) { swci.presentMode = m; break; }
+    }
     swci.clipped = VK_TRUE;
     VKC(vkCreateSwapchainKHR(h.dev, &swci, nullptr, &h.swap), "vkCreateSwapchainKHR");
 
@@ -713,9 +727,10 @@ static bool MakeSwapchain(Host &h, const char *why)
                    "the swapchain exists but does not own the display\n", ar);
     }
 
-    printf("  swapchain (%s): %ux%u, %u images, format %d, colour space %d%s\n",
+    printf("  swapchain (%s): %ux%u, %u images, format %d, colour space %d, %s%s\n",
            why, h.swap_ext.width, h.swap_ext.height, nimg,
            static_cast<int>(h.swap_fmt), static_cast<int>(h.swap_cs),
+           swci.presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "fifo",
            h.fse_held ? ", exclusive" : "");
     return true;
 }
@@ -1078,7 +1093,14 @@ int main(int argc, char **argv)
         {
         case STEP_FRAMES:
             printf("[%d/%d] frames %d\n", s + 1, sc.count, st.a);
-            for (int i = 0; i < st.a; ++i) if (!RenderFrame(h)) { s = sc.count; break; }
+            {
+                LARGE_INTEGER t0;
+                QueryPerformanceCounter(&t0);
+                int done = 0;
+                for (int i = 0; i < st.a; ++i, ++done)
+                    if (!RenderFrame(h)) { s = sc.count; break; }
+                PrintStepRate(t0, done);
+            }
             break;
         case STEP_PRESET:
             printf("[%d/%d] preset %d\n", s + 1, sc.count, st.a);

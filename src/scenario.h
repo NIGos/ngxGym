@@ -198,3 +198,20 @@ inline const char *StepName(const Step &s)
     }
     return "?";
 }
+
+// How long a 'frames N' step took, printed under it. The counters at the end of a
+// run say what the add-on did; they say nothing about what it cost, and a change
+// to the bridge's transport is measured in exactly this number. QueryPerformance-
+// Counter because a step is seconds long and GetTickCount's 16 ms would be a
+// tenth of a short one. Rate rather than time alone: the frame counts differ
+// between steps, so only the rate compares across a scenario.
+inline void PrintStepRate(const LARGE_INTEGER &t0, int frames)
+{
+    LARGE_INTEGER t1, f;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&f);
+    const double ms = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 /
+                      static_cast<double>(f.QuadPart);
+    printf("  step took %.1f ms, %.1f fps\n", ms,
+           ms > 0.0 ? static_cast<double>(frames) * 1000.0 / ms : 0.0);
+}

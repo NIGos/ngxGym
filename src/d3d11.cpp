@@ -853,7 +853,14 @@ int main(int argc, char **argv)
         {
         case STEP_FRAMES:
             printf("[%d/%d] frames %d\n", s + 1, sc.count, st.a);
-            for (int i = 0; i < st.a; ++i) if (!RenderFrame(h)) { s = sc.count; break; }
+            {
+                LARGE_INTEGER t0;
+                QueryPerformanceCounter(&t0);
+                int done = 0;
+                for (int i = 0; i < st.a; ++i, ++done)
+                    if (!RenderFrame(h)) { s = sc.count; break; }
+                PrintStepRate(t0, done);
+            }
             break;
         case STEP_MODE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
