@@ -95,11 +95,43 @@ PSOut ps(VSOut i)
     float  chk = step(0.5, frac(floor(p.x / 24.0) * 0.5 + floor(p.y / 24.0) * 0.5));
     float  n   = noise(p * 0.08) * 0.6 + noise(p * 0.31) * 0.3;
     float3 c = saturate(float3(chk * 0.8 + n, n, 1.0 - chk * 0.6) * 1.4) * hdr.x;
+    if (pad.x > 0.5)
+    {
+        const float3 patches[16] = {
+            float3(0.001,0.001,0.001), float3(0.01,0.01,0.01),
+            float3(0.1,0.1,0.1), float3(0.203,0.203,0.203),
+            float3(0.4,0.4,0.4), float3(1,1,1), float3(0,0,0), float3(0.05,0.05,0.05),
+            float3(0.203,0,0), float3(0,0.203,0), float3(0,0,0.203),
+            float3(0.203,0.203,0), float3(0,0.203,0.203), float3(0.203,0,0.203),
+            float3(0.15,0.08,0.04), float3(0.02,0.12,0.18)
+        };
+        c = patches[min((uint)(i.uv.x * 8), 7u) + 8 * min((uint)(i.uv.y * 2), 1u)] * hdr.x;
+    }
     if (hdr.y > 0.5) c = pq(c);
     o.color = float4(c, 1);
     o.mv    = mv_texel;
     o.depth = saturate(0.2 + 0.6 * i.uv.y);
     return o;
+}
+
+// An explicit scene -> display pipeline for placement comparisons. The source
+// is linear BT.709, 1 = diffuse white; the UI is composed AFTER tone mapping.
+Texture2D<float4> Scene : register(t0);
+float4 display_ps(float4 pos : SV_Position) : SV_Target
+{
+    uint w, h; Scene.GetDimensions(w, h);
+    float3 c = max(Scene.Load(int3(uint2(pos.xy), 0)).rgb, 0.0);
+    c *= 203.0 / (1.0 + max(c.r, max(c.g, c.b)) * 203.0 / 1000.0);
+    if (pos.y >= h * 0.875)
+    {
+        const float3 ui[4] = { float3(203,203,203), float3(1,1,1),
+                              float3(150,80,40), float3(20,120,180) };
+        c = ui[min(uint(pos.x * 4 / w), 3u)];
+    }
+    const float3x3 to2020 = { .6274039,.3292830,.0433131,
+                             .0690973,.9195404,.0113623,
+                             .0163914,.0880133,.8955953 };
+    return float4(pq(mul(to2020, c)), 1);
 }
 )";
 
@@ -133,6 +165,9 @@ struct Host
     UINT out_w = 1920, out_h = 1080, rw = 0, rh = 0;
     int  quality = NVSDK_NGX_PerfQuality_Value_MaxQuality;
     bool hdr = false;
+    bool colour_chart = false;
+    bool scene_pipeline = false;
+    bool scene_provider = false;
     // What the scene is multiplied by before it is written, and whether it is
     // PQ-encoded. 1 and off for SDR and plain float; scRGB scales linear light
     // (1.0 = 80 nits) and HDR10 encodes nits.
@@ -149,6 +184,7 @@ struct Host
     bool exposure_on = false;
     ID3D11VertexShader      *vs  = nullptr;
     ID3D11PixelShader       *ps  = nullptr;
+    ID3D11PixelShader       *display_ps = nullptr;
     ID3D11Buffer            *cb  = nullptr;
     ID3D11DepthStencilState *dss = nullptr;
 
@@ -163,6 +199,7 @@ struct Host
     UINT pad = 0;
     bool transpose = false;
     bool stale = false;
+    UINT sub_w = 0, sub_h = 0, sub_x = 0, sub_y = 0;   // subrect / subrectat
     Omit omit      = OMIT_NONE;
 
     int frame = 0, delivered = 0, evaluated = 0;
@@ -227,6 +264,7 @@ static unsigned int HostCreateFlags(const Host &h)
 {
     unsigned int fl = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
     if (h.hdr) fl |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
+    if (h.scene_pipeline && h.hdr) fl |= NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     return fl;
 }
 
@@ -262,14 +300,18 @@ static bool Rebuild(Host &h, const char *why)
     printf("  rebuild (%s): %ux%u -> %ux%u, quality %d, hdr %d\n",
            why, h.rw, h.rh, h.out_w, h.out_h, h.quality, h.hdr ? 1 : 0);
 
-    if (!MakeTex(h.dev, &h.color, h.rw, h.rh + h.pad, DXGI_FORMAT_R16G16B16A16_FLOAT,
+    // With DLSS off this texture is copied straight to the back buffer. D3D11
+    // copies cannot convert float to HDR10/SDR UNORM; render in the target format.
+    if (!MakeTex(h.dev, &h.color, h.rw, h.rh + h.pad,
+                 (h.dlss_on || h.scene_pipeline) ? DXGI_FORMAT_R16G16B16A16_FLOAT : h.display_fmt,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET) ||
         !MakeTex(h.dev, &h.mv, h.rw, h.rh + h.pad, DXGI_FORMAT_R16G16_FLOAT,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET) ||
         !MakeTex(h.dev, &h.depth, h.rw, h.rh + h.pad, DXGI_FORMAT_R32_TYPELESS,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_DEPTH_STENCIL,
                  DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_D32_FLOAT) ||
-        !MakeTex(h.dev, &h.output, h.out_w, h.out_h + h.pad, h.display_fmt,
+        !MakeTex(h.dev, &h.output, h.out_w, h.out_h + h.pad,
+                 h.scene_pipeline ? DXGI_FORMAT_R16G16B16A16_FLOAT : h.display_fmt,
                  D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS))
     { printf("FAIL: textures\n"); return false; }
 
@@ -459,8 +501,8 @@ static bool ApplyScrgb(Host &h, bool on, int nits)
 
 static bool RenderFrame(Host &h)
 {
-    const float jx = Halton((h.frame % 32) + 1, 2) - 0.5f;
-    const float jy = Halton((h.frame % 32) + 1, 3) - 0.5f;
+    const float jx = h.colour_chart ? 0.0f : Halton((h.frame % 32) + 1, 2) - 0.5f;
+    const float jy = h.colour_chart ? 0.0f : Halton((h.frame % 32) + 1, 3) - 0.5f;
     const float panx = static_cast<float>(h.frame) * kVelX;
     const float pany = static_cast<float>(h.frame) * kVelY;
     const float mvsx = -static_cast<float>(h.rw), mvsy = -static_cast<float>(h.rh);
@@ -469,7 +511,9 @@ static bool RenderFrame(Host &h)
     if (SUCCEEDED(h.ctx->Map(h.cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)))
     {
         CB c = {};
-        c.hdr[0] = h.scene_gain; c.hdr[1] = h.scene_pq ? 1.0f : 0.0f;
+        c.pad[0] = h.colour_chart ? 1.0f : 0.0f;
+        c.hdr[0] = h.scene_pipeline ? 1000.0f / 203.0f : h.scene_gain;
+        c.hdr[1] = !h.scene_pipeline && h.scene_pq ? 1.0f : 0.0f;
         c.pan[0] = panx; c.pan[1] = pany;
         c.jitter[0] = 2.0f * jx / static_cast<float>(h.rw);
         c.jitter[1] = -2.0f * jy / static_cast<float>(h.rh);
@@ -478,8 +522,8 @@ static bool RenderFrame(Host &h)
         // The pattern pans by +kVelX per frame, so a feature now was at x + kVelX
         // last frame; DLSS wants previous-minus-current, which is +kVelX pixels.
         // Divided by MV.Scale because NGX multiplies by it.
-        c.mv_texel[0] = kVelX / mvsx;
-        c.mv_texel[1] = kVelY / mvsy;
+        c.mv_texel[0] = h.colour_chart ? 0.0f : kVelX / mvsx;
+        c.mv_texel[1] = h.colour_chart ? 0.0f : kVelY / mvsy;
         memcpy(ms.pData, &c, sizeof(c));
         h.ctx->Unmap(h.cb, 0);
     }
@@ -511,6 +555,29 @@ static bool RenderFrame(Host &h)
     ID3D11RenderTargetView *none[2] = { nullptr, nullptr };
     h.ctx->OMSetRenderTargets(2, none, nullptr);
 
+    if (h.scene_provider)
+    {
+        using SceneFn = HRESULT (*)(ID3D11DeviceContext *, ID3D11Texture2D *, ID3D11Texture2D *, float, float, BOOL);
+        const auto scene = reinterpret_cast<SceneFn>(GetProcAddress(
+            GetModuleHandleW(L"dlss5-bridge.addon64"), "BridgeSceneExperimentD3D11"));
+        if (h.dlss_on || !scene)
+        { puts("FAIL: sceneprovider needs nodlss and the experimental bridge export"); return false; }
+        if (h.frame == 0)
+        {
+            ID3D11DeviceContext *deferred = nullptr;
+            const bool made = SUCCEEDED(h.dev->CreateDeferredContext(0, &deferred));
+            const bool rejected = scene(nullptr, h.color.tex, h.depth.tex, 0, 0, FALSE) == E_INVALIDARG &&
+                scene(h.ctx, h.depth.tex, h.color.tex, 0, 0, FALSE) == E_INVALIDARG &&
+                made && scene(deferred, h.color.tex, h.depth.tex, 0, 0, FALSE) == E_INVALIDARG;
+            if (deferred) deferred->Release();
+            if (!rejected) { puts("FAIL: scene provider input validation"); return false; }
+            puts("scene provider: null, wrong format and deferred context rejected");
+        }
+        // Exercise a real history cut, including the OFA warm-up frame.
+        if (FAILED(scene(h.ctx, h.color.tex, h.depth.tex, jx, jy, h.frame == 600)))
+        { puts("FAIL: scene provider rejected the frame"); return false; }
+    }
+
     if (h.dlss_on && h.feat != nullptr)
     {
         EvalContract ec = {};
@@ -519,7 +586,17 @@ static bool RenderFrame(Host &h)
         SetF(&ec.sharpness, 0.0f);
         SetF(&ec.pre_exposure, 1.0f);
         SetU(&ec.reset, h.frame == 0 ? 1u : 0u);
-        SetU(&ec.subrect_w, h.rw); SetU(&ec.subrect_h, h.rh);
+        // A declared region smaller than the feature, based where the scenario
+        // says; the textures stay the feature's size, as PSO2's do (#8).
+        const bool region = h.sub_w != 0 && h.sub_h != 0;
+        SetU(&ec.subrect_w, region ? h.sub_w : h.rw); SetU(&ec.subrect_h, region ? h.sub_h : h.rh);
+        if (region)
+        {
+            SetU(&ec.in_color_x, h.sub_x); SetU(&ec.in_color_y, h.sub_y);
+            SetU(&ec.in_depth_x, h.sub_x); SetU(&ec.in_depth_y, h.sub_y);
+            SetU(&ec.in_mv_x, h.sub_x);    SetU(&ec.in_mv_y, h.sub_y);
+            SetU(&ec.out_x, 0u);           SetU(&ec.out_y, 0u);
+        }
         if (h.omit != OMIT_FLAGS) SetU(&ec.create_flags, HostCreateFlags(h));
         if (h.omit != OMIT_QUALITY) SetU(&ec.perf_quality, static_cast<unsigned int>(h.quality));
 
@@ -631,7 +708,24 @@ static bool RenderFrame(Host &h)
         // ugly and is not the point. What matters is that presents keep happening
         // and that what is presented CHANGES, because a frozen image is
         // indistinguishable from a bridge that has stopped.
-        if (h.dlss_on && h.feat != nullptr)
+        if (h.scene_pipeline)
+        {
+            if (!h.hdr || h.pad || h.rw != h.out_w || h.rh != h.out_h)
+            { puts("FAIL: scenepipeline requires HDR10, DLAA/full resolution and no padding"); bb->Release(); return false; }
+            ID3D11RenderTargetView *target = nullptr;
+            if (FAILED(h.dev->CreateRenderTargetView(bb, nullptr, &target)))
+            { puts("FAIL: scene display RTV"); bb->Release(); return false; }
+            ID3D11ShaderResourceView *src = h.dlss_on ? h.output.srv : h.color.srv;
+            h.ctx->OMSetRenderTargets(1, &target, nullptr);
+            h.ctx->PSSetShaderResources(0, 1, &src);
+            h.ctx->PSSetShader(h.display_ps, nullptr, 0);
+            h.ctx->Draw(3, 0);
+            src = nullptr;
+            h.ctx->PSSetShaderResources(0, 1, &src);
+            h.ctx->OMSetRenderTargets(0, nullptr, nullptr);
+            target->Release();
+        }
+        else if (h.dlss_on && h.feat != nullptr)
         {
             // The region, not the resource: with padding the output allocation
             // is taller than the back buffer.
@@ -763,6 +857,7 @@ int main(int argc, char **argv)
     if (argc > 1 && strstr(argv[1], ".txt") != nullptr)
     {
         if (!ScenarioLoad(&sc, argv[1])) { printf("FAIL: scenario\n"); return 2; }
+        if (sc.probe_compute) { puts("FAIL: probecompute is a Vulkan diagnostic"); return 2; }
     }
     else
     {
@@ -845,6 +940,12 @@ int main(int argc, char **argv)
     { printf("FAIL: shader: %s\n", err ? static_cast<const char *>(err->GetBufferPointer()) : "?"); return 2; }
     h.dev->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &h.vs);
     h.dev->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &h.ps);
+    ID3DBlob *display_code = nullptr;
+    if (FAILED(D3DCompile(kShader, sizeof(kShader) - 1, "display", nullptr, nullptr,
+                          "display_ps", "ps_5_0", 0, 0, &display_code, &err)) ||
+        FAILED(h.dev->CreatePixelShader(display_code->GetBufferPointer(), display_code->GetBufferSize(), nullptr, &h.display_ps)))
+    { puts("FAIL: display shader"); return 2; }
+    display_code->Release();
 
     D3D11_BUFFER_DESC bd = {};
     bd.ByteWidth = sizeof(CB); bd.Usage = D3D11_USAGE_DYNAMIC;
@@ -856,6 +957,9 @@ int main(int argc, char **argv)
     h.dev->CreateDepthStencilState(&dsd, &h.dss);
 
     h.dlss_on = !sc.nodlss;
+    h.colour_chart = sc.colour_chart;
+    h.scene_pipeline = sc.scene_pipeline;
+    h.scene_provider = sc.scene_provider;
     if (!Rebuild(h, "start")) return 3;
 
     // How many frames the scenario asks for, so a run that ends early is a failure
@@ -931,6 +1035,14 @@ int main(int argc, char **argv)
             h.pad = static_cast<UINT>(st.a < 0 ? 0 : st.a);
             if (!Rebuild(h, "pad")) rc = 4;
             break;
+        case STEP_SUBRECT:
+            printf("[%d/%d] subrect %d %d\n", s + 1, sc.count, st.a, st.b);
+            h.sub_w = static_cast<UINT>(st.a); h.sub_h = static_cast<UINT>(st.b);
+            break;
+        case STEP_SUBRECTAT:
+            printf("[%d/%d] subrectat %d %d\n", s + 1, sc.count, st.a, st.b);
+            h.sub_x = static_cast<UINT>(st.a); h.sub_y = static_cast<UINT>(st.b);
+            break;
         case STEP_TRANSPOSE:
             printf("[%d/%d] %s\n", s + 1, sc.count, StepName(st));
             h.transpose = st.a != 0;
@@ -975,6 +1087,7 @@ int main(int argc, char **argv)
     if (h.caps) NVSDK_NGX_D3D11_Shutdown1(h.dev);
     if (h.dss) h.dss->Release(); if (h.cb) h.cb->Release();
     if (h.vs) h.vs->Release();   if (h.ps) h.ps->Release();
+    if (h.display_ps) h.display_ps->Release();
     if (vsb) vsb->Release();     if (psb) psb->Release();
     h.color.Release(); h.mv.Release(); h.depth.Release(); h.output.Release();
     h.exposure.Release();

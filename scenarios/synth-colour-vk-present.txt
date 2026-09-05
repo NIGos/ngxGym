@@ -1,0 +1,13 @@
+# HDR colour fidelity with the shader presentation path.
+nodlss
+colourchart
+hdr on
+preset 5
+frames 1800
+
+# vk-only
+# nofast
+# cfg: synth=1
+# cfg: hash_out=2
+# cfg: vk_present=1
+# expect: HDR10 PQ conversion ready

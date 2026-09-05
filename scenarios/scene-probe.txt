@@ -1,0 +1,4 @@
+# diagnostic-only
+# vk-only
+probecompute
+frames 180

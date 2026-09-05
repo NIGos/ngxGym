@@ -35,7 +35,10 @@ param(
     # it is staged as the consumer under test.
     [string] $Snippet = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'snippets/nvngx_dlss.dll'),
     # The add-on under test: a copy beside this script, else a sibling checkout.
-    [string] $Addon = ''
+    [string] $Addon = '',
+    # Optional read-only shader-stage probe; one fragment/compute CRC32 per line.
+    [string] $SceneProbeProfile = '',
+    [switch] $SceneProbeIntegrated
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,6 +81,11 @@ if ($Register) {
 }
 
 if (Test-Path $run) {
+    if (Get-Process -Name ngxGym-vk -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $target }) {
+        Write-Host "FAIL: host is still running in $run; its files were left intact."
+        exit 2
+    }
     Get-ChildItem -Path $run -Force -Recurse | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 }
 New-Item -ItemType Directory -Force $run | Out-Null
@@ -91,6 +99,10 @@ if ($stale) {
 
 Copy-Item $exe   $run
 Copy-Item $addon $run
+if ($SceneProbeProfile) {
+    if (-not $SceneProbeIntegrated) { Copy-Item (Join-Path $root 'bin/scene-probe.addon64') $run }
+    Copy-Item $SceneProbeProfile (Join-Path $run 'scene-probe.cfg')
+}
 Write-Host ("add-on: {0}  {1:yyyy-MM-dd HH:mm:ss}" -f $addon, (Get-Item $addon).LastWriteTime) -ForegroundColor DarkGray
 # No d3d11.dll proxy here: on Vulkan ReShade arrives as a layer, not as a DLL beside
 # the executable. If a proxy shows up in this folder something is wrong.
@@ -134,6 +146,7 @@ Copy-Item (Join-Path $root 'reshade-fx') (Join-Path $run 'fx') -Recurse
 @"
 [GENERAL]
 PresetPath=.\default.ini
+PreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=0
 EffectSearchPaths=.\fx
 TextureSearchPaths=.\fx
 [ADDON]
@@ -185,6 +198,12 @@ if ($Scenario -and (Test-Path $scfile)) {
     if ($extra.Count -gt 0) {
         Add-Content -Path (Join-Path $run 'dlss5-bridge.cfg') -Value $extra -Encoding ASCII
         Write-Host ("scenario config: " + ($extra -join ', '))
+    }
+    $nr = @(Select-String -Path $scfile -Pattern '^#\s*nr:\s*(\w+=.+)$' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() })
+    if ($nr.Count -gt 0) {
+        Add-Content -Path (Join-Path $run 'ReShade.ini') -Value (@('[RenoDX.DLSS5]') + $nr) -Encoding ASCII
+        Write-Host ("consumer config: " + ($nr -join ', '))
     }
 }
 # The add-on replaces a settings file from another version with its defaults at
@@ -488,4 +507,12 @@ if (Test-Path $rs) {
     }
 }
 
+# The known patch stimulus is checked as well as the output, so a blank or
+# misencoded input cannot turn a colour regression into a false PASS.
+if ((Test-Path $scfile) -and (Select-String $scfile -Pattern '^colourchart$' -Quiet)) {
+    $checkArgs = @((Join-Path $root 'check-colour.py'), $log)
+    if ($consumerStaged) { $checkArgs += '--consumer' }
+    & python @checkArgs
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
 exit 0

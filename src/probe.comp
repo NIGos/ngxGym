@@ -1,0 +1,4 @@
+#version 450
+// One genuine compute dispatch for the read-only stage probe integration test.
+layout(local_size_x = 1) in;
+void main() {}

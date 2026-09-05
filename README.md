@@ -120,6 +120,8 @@ Directives in comments:
 | `# expect-after: A :: B` | some B after the last A. `# expect-after-d3d11:` and `# expect-after-vk:` for one backend |
 | `# host-may-fail` | the host's own NGX evaluates may fail without failing the run; `-d3d11` / `-vk` for one backend. Alone on its line |
 | `# cfg: key=value` | appended to the generated `dlss5-bridge.cfg` |
+| `# nr: key=value` | written to the consumer's `[RenoDX.DLSS5]` settings for a reproducible neural profile |
+| `# diagnostic-only` | run explicitly with the runner; excluded from the release suite (intentional failure reproducers and A/B experiments) |
 | `# cfg-old-file` | leave the settings file unstamped, to test its replacement |
 | `# nofast` | run in full under `-Fast` |
 | `# d3d11-only` | the suite skips the scenario on the Vulkan host |
@@ -128,6 +130,29 @@ Directives in comments:
 
 A verb the parser accepts and the executor drops fails the run rather than
 passing it.
+
+`colourchart` replaces the moving scene with 16 stationary patches. The
+`synth-colour` scenario uses known HDR10 luminances (1–1000 nits), saturated
+BT.2020 primaries and mixed colours. Both runners invoke `check-colour.py`
+(Python 3, standard library only) for this scenario: it checks the actual input
+against those known values, then compares every output channel in nits.
+Use `-NoConsumer` to isolate the bridge and DLSS. With the neural add-on present,
+the check permits its intentional changes, but rejects broad gamut contamination.
+`hash_out=2` enables the patch-centre readback; `hash_out=1` retains ordinary
+means and hashes. Run with the display already in HDR mode.
+
+The HDR10 DLSS-off scene is rendered in the back buffer's format on D3D11;
+Vulkan explicitly PQ-encodes the scene before its present blit. Earlier versions
+copied incompatible D3D11 formats and presented unencoded Vulkan values, so their
+HDR log-only checks did not establish colour fidelity.
+The generated ReShade configuration declares normal depth, matching the host's
+own DLSS contract and shader, instead of inheriting ReShade's reversed-depth default.
+
+`synth-colour-bg3*` are explicit diagnostic runs with the reported BG3 neural
+profile. The default profile reproduces colour changes caused by neural Local
+Tone; `-local0` isolates that control, while `-intensity0` checks the consumer's
+colour codec without a requested neural change. These diagnostics are excluded
+from the release suite: a configured artistic change is not a transport assertion.
 
 ## Verdict
 
@@ -165,7 +190,55 @@ reshade-fx\           the effect that gives ReShade something to run
 notes\                measurements worth keeping
 ```
 
-## Third-party
+## HDR processing placement (D3D11 diagnostic)
+
+`scene-pre`, `scene-post` and `scene-ofa` separate scene-linear BT709 colour,
+a 1000-nit shoulder, and a later opaque UI. All use full-resolution HDR10.
+The first runs native DLAA before tone mapping; the second runs synthetic OFA
+on the final display image; the third supplies scene colour/depth directly to
+the bridge's experimental OFA entry point, with host DLSS disabled.
+
+Build the third with `../ngxbridge/tests/build-scene.cmd` and pass its
+`tests/scene-build/dlss5-bridge.addon64` to `run.ps1 -Addon`. It is excluded from
+normal bridge builds. Run each scenario with and without `-NoConsumer`, always
+`-Background`, preserving each run's `gym-display.bin` before the next run.
+The capture add-on records packed HDR10 at `reshade_finish_effects`, before
+Present. `check-placement.py` takes the four pre/post files, then optionally
+the two OFA files; its docstring gives their order.
+
+The assertions check plain transport and unchanged UI. Scene differences
+between neural paths are reported, not declared errors solely because NR
+changes lighting. These patch measurements do not establish temporal or
+whole-image equivalence, nor validate a BG3/Vulkan integration.
+
+## Offline shader inspection and Vulkan stage probe
+
+`inspect-scene-shaders.py EXTRACTED_DIR OUTPUT_DIR --sdk-bin SDK/Bin` scans
+extracted BSHD containers, validates SPIR-V with `spirv-val`, and records CRC32,
+SHA256, entry points and descriptor reflection using `spirv-cross`. It emits a
+`scene-probe.cfg` for fragment and compute modules. Extraction of game packages
+is separate; the inspector never modifies game files. Fingerprints establish
+shader identity, not runtime execution or colour/exposure semantics.
+
+The bridge now includes the probe; `build-scene-probe.cmd` builds an optional
+standalone wrapper around the same implementation for older bridge builds.
+The probe logs matching Vulkan pipeline creation and up to four matching
+fragment pass observations/compute dispatches, including whether a render pass is active.
+It does not copy resources, wait on the GPU, change shaders or perform NR.
+Remove the probe add-on and profile when the observation is complete.
+
+`run-vk.ps1 -Scenario scene-probe -Background -Validate -SceneProbeProfile PROFILE`
+exercises real graphics and compute pipelines. A matching profile must observe
+the fragment draw inside a render pass and the compute dispatch outside it;
+an unknown fingerprint must produce neither. The `probecompute` scenario verb
+is deliberately rejected by the D3D11 host. Profiles are opt-in for Gym runs.
+Add `-SceneProbeIntegrated` to stage only the profile, using the bridge's built-in
+observer. Profile lines may include `CRC32 SET BINDING`. The diagnostic also
+exercises an unused float image descriptor: direct update, copy invalidation,
+and fresh direct update. `check-scene-probe.py MATCH_LOG INVALID_BINDING_LOG`
+checks those observations and ensures they never certify scene semantics.
+
+## Third-party licences and dependencies
 
 `reshade-fx\ReShade.fxh` is from the ReShade shader repository, CC0. The NGX
 headers and library come from NVIDIA's DLSS SDK under its own licence and are

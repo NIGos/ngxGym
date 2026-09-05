@@ -7,6 +7,8 @@ layout(push_constant) uniform Push {
     vec2 jitter;      // already in clip space
     vec2 inv_render;
     vec2 mv_scale;
+    vec2 hdr;
+    float chart;
 } pc;
 
 layout(location = 0) out vec2 v_uv;

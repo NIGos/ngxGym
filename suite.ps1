@@ -36,6 +36,9 @@ $rows = @()
 foreach ($b in $backends) {
     $runner = Join-Path $root ($b -eq 'vk' ? 'run-vk.ps1' : 'run.ps1')
     foreach ($s in $scenarios) {
+        # Deliberate failure reproducers and neural-setting A/B experiments are
+        # run explicitly, not used as unconditional release assertions.
+        if (Select-String -Path (Join-Path $root "scenarios/$s.txt") -Pattern '^#\s*diagnostic-only' -Quiet) { continue }
         # "# d3d11-only": a scenario using a verb the Vulkan host does not have.
         if ($b -eq 'vk' -and (Select-String -Path (Join-Path $root "scenarios/$s.txt") -Pattern '^#\s*d3d11-only' -Quiet)) { continue }
         if ($b -eq 'd3d11' -and (Select-String -Path (Join-Path $root "scenarios/$s.txt") -Pattern '^#\s*vk-only' -Quiet)) { continue }

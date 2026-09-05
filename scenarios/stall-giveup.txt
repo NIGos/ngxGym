@@ -1,0 +1,14 @@
+# diagnostic-only
+# d3d11-only
+# The other half of stall-resume: a queue that never catches up. stall_test holds
+# the private D3D12 queue for 6 s, past the four seconds the bridge waits after
+# releasing the game, so it must give up cleanly rather than deliver a stale
+# frame or hang the render thread. The stand-down is the expected outcome here,
+# which is why this is not a suite scenario.
+frames 900
+
+# cfg: hash_out=0
+# cfg: stall_test=6000
+
+# expect-d3d11: completed nothing for 500 ms
+# expect-d3d11: has not caught up 4 s after the stall

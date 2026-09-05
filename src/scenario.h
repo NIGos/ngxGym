@@ -40,7 +40,7 @@
 enum StepKind
 {
     STEP_FRAMES, STEP_MODE, STEP_RESIZE, STEP_PRESET, STEP_RECREATE,
-    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT, STEP_EXPOSURE, STEP_STALE, STEP_SDR, STEP_SCRGB, STEP_DEPTHCOLOR, STEP_PAD
+    STEP_DLSS, STEP_HDR, STEP_TRANSPOSE, STEP_OMIT, STEP_EXPOSURE, STEP_STALE, STEP_SDR, STEP_SCRGB, STEP_DEPTHCOLOR, STEP_PAD, STEP_SUBRECT, STEP_SUBRECTAT
 };
 
 enum Mode { MODE_WINDOWED, MODE_BORDERLESS, MODE_EXCLUSIVE };
@@ -60,6 +60,10 @@ struct Scenario
     // "nodlss": the host never creates an NGX feature. A game that has no DLSS
     // at all, which is the case the substitute contract's pre-arm path is for.
     bool nodlss = false;
+    bool colour_chart = false;
+    bool scene_pipeline = false;
+    bool scene_provider = false;
+    bool probe_compute = false;
 };
 
 // "on" or "off" and nothing else. "onn" used to read as off, and the
@@ -109,6 +113,14 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
         char verb[32] = {}, a1[32] = {}, a2[32] = {}, a3[32] = {};
         const int n = sscanf_s(line, "%31s %31s %31s %31s", verb, static_cast<unsigned>(sizeof(verb)), a1, static_cast<unsigned>(sizeof(a1)), a2, static_cast<unsigned>(sizeof(a2)), a3, static_cast<unsigned>(sizeof(a3)));
         if (n < 1 || verb[0] == '#') continue;
+        if (_stricmp(verb, "colourchart") == 0 && n == 1)
+        { s->colour_chart = true; continue; }
+        if (_stricmp(verb, "scenepipeline") == 0 && n == 1)
+        { s->scene_pipeline = true; continue; }
+        if (_stricmp(verb, "sceneprovider") == 0 && n == 1)
+        { s->scene_provider = true; s->scene_pipeline = true; continue; }
+        if (_stricmp(verb, "probecompute") == 0 && n == 1)
+        { s->probe_compute = true; continue; }
 
         int v = 0, w = 0;
         bool bad = false;
@@ -146,6 +158,12 @@ inline bool ScenarioLoad(Scenario *s, const char *path)
         }
         else if (_stricmp(verb, "depthcolor") == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_DEPTHCOLOR, v); else bad = true; }
         else if (_stricmp(verb, "pad")        == 0 && n >= 2) { if (Num(a1, &v) && v >= 0) ScenarioAdd(s, STEP_PAD, v); else bad = true; }
+        // The render region the evaluate declares, inside textures that stay the
+        // feature's size: "subrect W H" (0 0 restores the feature's own size) and
+        // "subrectat X Y" for where the inputs are based. Phantasy Star Online 2
+        // (#8) creates 3840x2160 and evaluates 2560x1440 at 640,360.
+        else if (_stricmp(verb, "subrect")    == 0 && n >= 3) { if (Num(a1, &v) && Num(a2, &w) && v >= 0 && w >= 0) ScenarioAdd(s, STEP_SUBRECT, v, w); else bad = true; }
+        else if (_stricmp(verb, "subrectat")  == 0 && n >= 3) { if (Num(a1, &v) && Num(a2, &w) && v >= 0 && w >= 0) ScenarioAdd(s, STEP_SUBRECTAT, v, w); else bad = true; }
         else if (_stricmp(verb, "transpose")  == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_TRANSPOSE, v); else bad = true; }
         else if (_stricmp(verb, "stale")      == 0 && n >= 2) { if (OnOff(a1, &v)) ScenarioAdd(s, STEP_STALE, v); else bad = true; }
         else if (_stricmp(verb, "nodlss")     == 0)           s->nodlss = true;
@@ -191,6 +209,8 @@ inline const char *StepName(const Step &s)
     case STEP_SCRGB:     return s.a ? "scrgb on" : "scrgb off";
     case STEP_DEPTHCOLOR: return s.a ? "depthcolor on" : "depthcolor off";
     case STEP_PAD:       return "pad";
+    case STEP_SUBRECT:   return "subrect";
+    case STEP_SUBRECTAT: return "subrectat";
     case STEP_TRANSPOSE: return s.a ? "transpose on" : "transpose off";
     case STEP_STALE:     return s.a ? "stale on" : "stale off";
     case STEP_OMIT:      return "omit";

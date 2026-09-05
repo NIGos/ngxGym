@@ -1,0 +1,16 @@
+# d3d11-only
+# The private D3D12 queue stops completing for a moment and comes back. Baldur's
+# Gate 3 on a 4060 Ti (#16) ran 1200 frames and then completed nothing for half
+# a second, once; the device was not removed and the game carried on, and the
+# bridge's rule was to stop for good on that. stall_test holds the queue on a
+# fence for 800 ms at the 60th submission: the bridge must release the game,
+# stand aside with the game's own DLSS on screen, and deliver again once the
+# queue has caught up -- not stand down.
+frames 900
+
+# cfg: hash_out=0
+# cfg: stall_test=800
+
+# expect-d3d11: stall_test: the D3D12 queue is held for 800 ms
+# expect-d3d11: completed nothing for 500 ms
+# expect-d3d11: the D3D12 side caught up after

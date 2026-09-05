@@ -39,6 +39,11 @@ if errorlevel 1 exit /b 1
 
 echo built: %~dp0bin\ngxGym.exe
 
+cl /nologo /W4 /EHsc /O2 /MT /std:c++17 /LD ^
+   /I"%~dp0..\ngxbridge\reshade" /Fo:"%~dp0bin\\" ^
+   "%~dp0src\capture.cpp" /link /OUT:"%~dp0bin\gym-capture.addon64" /IMPLIB:"%~dp0bin\gym-capture.lib"
+if errorlevel 1 exit /b 1
+
 rem The Vulkan host. Optional: it needs the Vulkan SDK, and the D3D11 half is useful
 rem without it, so a missing SDK is a message rather than a failed build.
 set VKSDK=%VULKAN_SDK%
@@ -56,6 +61,8 @@ if not exist "%~dp0src\generated" mkdir "%~dp0src\generated"
 "%VKSDK%\Bin\glslc.exe" -fshader-stage=vert "%~dp0src\scene.vert" -o "%~dp0src\generated\scene_vert.h" -mfmt=c
 if errorlevel 1 exit /b 1
 "%VKSDK%\Bin\glslc.exe" -fshader-stage=frag "%~dp0src\scene.frag" -o "%~dp0src\generated\scene_frag.h" -mfmt=c
+if errorlevel 1 exit /b 1
+"%VKSDK%\Bin\glslc.exe" -fshader-stage=comp "%~dp0src\probe.comp" -o "%~dp0src\generated\probe_comp.h" -mfmt=c
 if errorlevel 1 exit /b 1
 
 cl /nologo /W4 /EHsc /O2 /MT /std:c++17 ^

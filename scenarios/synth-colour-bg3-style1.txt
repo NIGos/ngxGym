@@ -1,0 +1,21 @@
+# diagnostic-only
+# The user's neural settings, independent of the game's installation.
+nodlss
+colourchart
+hdr on
+preset 5
+frames 1800
+# nofast
+# cfg: synth=1
+# cfg: hash_out=2
+# nr: NeuralUplift=1
+# nr: NRAutoMask=1
+# nr: NREnableUpscaling=0
+# nr: NRGlobalTone=1
+# nr: NRIntensity=1
+# nr: NRLocalStructure=1
+# nr: NRLocalTone=1
+# nr: NRSkinStructure=-1
+# nr: NRStyle=1
+# nr: NRUICorrection=1
+# expect: HDR10 PQ conversion ready

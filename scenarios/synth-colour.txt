@@ -1,0 +1,10 @@
+# HDR10 colour diagnostic. Keep the window size fixed to isolate the transform.
+nodlss
+colourchart
+hdr on
+preset 5
+frames 1800
+# nofast
+# cfg: synth=1
+# cfg: hash_out=2
+# expect: HDR10 PQ conversion ready

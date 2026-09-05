@@ -45,6 +45,9 @@ static const uint32_t kSceneVert[] =
 static const uint32_t kSceneFrag[] =
 #include "generated/scene_frag.h"
 ;
+static const uint32_t kProbeComp[] =
+#include "generated/probe_comp.h"
+;
 
 #define VKC(x, what) do { \
     const VkResult r_ = (x); \
@@ -54,7 +57,7 @@ static const uint32_t kSceneFrag[] =
 static const float kVelX = 0.37f;
 static const float kVelY = 0.11f;
 
-struct Push { float pan[2]; float jitter[2]; float inv_render[2]; float mv_texel[2]; };
+struct Push { float pan[2]; float jitter[2]; float inv_render[2]; float mv_texel[2]; float hdr[2]; float chart; };
 
 struct Img
 {
@@ -90,6 +93,13 @@ struct Host
 
     VkPipelineLayout play = VK_NULL_HANDLE;
     VkPipeline       pipe = VK_NULL_HANDLE;
+    VkPipeline probe_pipe = VK_NULL_HANDLE;
+    VkPipelineLayout probe_layout = VK_NULL_HANDLE;
+    bool probe_compute = false;
+    VkDescriptorSetLayout probe_sets[2] = {};
+    VkDescriptorPool probe_pool = VK_NULL_HANDLE;
+    VkDescriptorSet probe_table = VK_NULL_HANDLE;
+    VkDescriptorSet probe_copy = VK_NULL_HANDLE;
 
     Img color, mv, depth, output;
     // Depth written a second time, into an R32_SFLOAT colour image, the way RTX
@@ -112,6 +122,7 @@ struct Host
     LONG_PTR  windowed_style = 0;
     RECT      windowed_rect = {};
     bool      hdr = false;
+    bool      colour_chart = false;
     bool      exposure_on = false;
     Img       expo;
 
@@ -215,6 +226,33 @@ static NVSDK_NGX_Resource_VK AsResource(const Img &i, bool rw)
 
 static bool BuildPipeline(Host &h)
 {
+    if (h.probe_compute && !h.probe_pool) {
+        VkDescriptorSetLayoutCreateInfo set = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        VKC(vkCreateDescriptorSetLayout(h.dev, &set, nullptr, &h.probe_sets[0]), "probe empty set");
+        VkDescriptorSetLayoutBinding binding = {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        set.bindingCount = 1; set.pBindings = &binding;
+        VKC(vkCreateDescriptorSetLayout(h.dev, &set, nullptr, &h.probe_sets[1]), "probe image set");
+        VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2};
+        VkDescriptorPoolCreateInfo pool = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+        pool.maxSets = 2; pool.poolSizeCount = 1; pool.pPoolSizes = &size;
+        VKC(vkCreateDescriptorPool(h.dev, &pool, nullptr, &h.probe_pool), "probe descriptor pool");
+        VkDescriptorSetAllocateInfo allocate = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        VkDescriptorSetLayout layouts[2] = {h.probe_sets[1], h.probe_sets[1]};
+        VkDescriptorSet tables[2] = {};
+        allocate.descriptorPool = h.probe_pool; allocate.descriptorSetCount = 2; allocate.pSetLayouts = layouts;
+        VKC(vkAllocateDescriptorSets(h.dev, &allocate, tables), "probe descriptor tables");
+        h.probe_table = tables[0]; h.probe_copy = tables[1];
+    }
+    if (h.probe_compute) {
+        // Deliberately unused by the shader: binding a float image alone must
+        // never make the probe assert that it found valid scene semantics.
+        VkDescriptorImageInfo image = { VK_NULL_HANDLE, h.color.view, VK_IMAGE_LAYOUT_GENERAL };
+        VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = h.probe_table; write.dstBinding = 1; write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; write.pImageInfo = &image;
+        vkUpdateDescriptorSets(h.dev, 1, &write, 0, nullptr);
+        if (h.frame) { write.dstSet = h.probe_copy; vkUpdateDescriptorSets(h.dev, 1, &write, 0, nullptr); }
+    }
     VkShaderModuleCreateInfo smi = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
     VkShaderModule vs = VK_NULL_HANDLE, fs = VK_NULL_HANDLE;
     smi.codeSize = sizeof(kSceneVert); smi.pCode = kSceneVert;
@@ -225,6 +263,7 @@ static bool BuildPipeline(Host &h)
     VkPushConstantRange pcr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                 0, sizeof(Push) };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    if (h.probe_compute) { pli.setLayoutCount = 2; pli.pSetLayouts = h.probe_sets; }
     pli.pushConstantRangeCount = 1; pli.pPushConstantRanges = &pcr;
     VKC(vkCreatePipelineLayout(h.dev, &pli, nullptr, &h.play), "vkCreatePipelineLayout");
 
@@ -434,6 +473,45 @@ static bool RenderFrame(Host &h)
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(h.cmd, &bi);
+    if (h.probe_compute) {
+        if (h.frame == 1) {
+            VkCopyDescriptorSet copy = { VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET };
+            copy.srcSet = h.probe_table; copy.srcBinding = 1;
+            copy.dstSet = h.probe_copy; copy.dstBinding = 1; copy.descriptorCount = 1;
+            vkUpdateDescriptorSets(h.dev, 0, nullptr, 1, &copy);
+        }
+        if (h.frame == 2) {
+            VkDescriptorImageInfo image = { VK_NULL_HANDLE, h.color.view, VK_IMAGE_LAYOUT_GENERAL };
+            VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            write.dstSet = h.probe_copy; write.dstBinding = 1; write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; write.pImageInfo = &image;
+            vkUpdateDescriptorSets(h.dev, 1, &write, 0, nullptr);
+        }
+        const auto table = h.frame ? h.probe_copy : h.probe_table;
+        vkCmdBindDescriptorSets(h.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.play, 1, 1, &table, 0, nullptr);
+    }
+    if (h.probe_compute)
+    {
+        if (!h.probe_pipe)
+        {
+            VkPipelineLayoutCreateInfo layout = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+            VKC(vkCreatePipelineLayout(h.dev, &layout, nullptr, &h.probe_layout), "probe layout");
+            VkShaderModuleCreateInfo module = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+            module.codeSize = sizeof(kProbeComp); module.pCode = kProbeComp;
+            VkShaderModule shader = VK_NULL_HANDLE;
+            VKC(vkCreateShaderModule(h.dev, &module, nullptr, &shader), "probe shader");
+            VkComputePipelineCreateInfo pipeline = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+            pipeline.layout = h.probe_layout;
+            pipeline.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+            pipeline.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+            pipeline.stage.module = shader; pipeline.stage.pName = "main";
+            const VkResult result = vkCreateComputePipelines(h.dev, VK_NULL_HANDLE, 1, &pipeline, nullptr, &h.probe_pipe);
+            vkDestroyShaderModule(h.dev, shader, nullptr);
+            VKC(result, "probe pipeline");
+        }
+        vkCmdBindPipeline(h.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, h.probe_pipe);
+        vkCmdDispatch(h.cmd, 1, 1, 1);
+    }
 
     VkRenderingAttachmentInfo ca[3] = {};
     ca[0] = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -466,6 +544,13 @@ static bool RenderFrame(Host &h)
     pc.inv_render[1] = 1.0f / static_cast<float>(h.rh);
     pc.mv_texel[0] = kVelX / mvsx;
     pc.mv_texel[1] = kVelY / mvsy;
+    pc.hdr[0] = h.hdr ? 1000.0f : 1.0f;
+    pc.hdr[1] = h.hdr ? 1.0f : 0.0f;
+    pc.chart = h.colour_chart ? 1.0f : 0.0f;
+    if (h.colour_chart) {
+        pc.jitter[0] = pc.jitter[1] = 0;
+        pc.mv_texel[0] = pc.mv_texel[1] = 0;
+    }
     vkCmdPushConstants(h.cmd, h.play, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pc), &pc);
     // Nine draws, not one: see the D3D11 host's draw loop for why.
@@ -1081,6 +1166,7 @@ int main(int argc, char **argv)
         strncpy_s(sc.name, "smoke", _TRUNCATE);
     }
     printf("ngxGym-vk: scenario '%s', %d steps\n", sc.name, sc.count);
+    if (sc.scene_pipeline) { puts("FAIL: scenepipeline is currently a D3D11 diagnostic"); return 2; }
 
     Host h;
     WNDCLASSEXW wc = {};
@@ -1096,6 +1182,8 @@ int main(int argc, char **argv)
     ShowHostWindow(h.hwnd);
 
     h.dlss_on = !sc.nodlss;
+    h.colour_chart = sc.colour_chart;
+    h.probe_compute = sc.probe_compute;
     if (!Setup(h)) return 3;
     if (!Rebuild(h, "start")) return 3;
 
@@ -1210,6 +1298,10 @@ int main(int argc, char **argv)
 
     vkDeviceWaitIdle(h.dev);
     ReleaseFeat(h);
+    if (h.probe_pipe) vkDestroyPipeline(h.dev, h.probe_pipe, nullptr);
+    if (h.probe_layout) vkDestroyPipelineLayout(h.dev, h.probe_layout, nullptr);
+    if (h.probe_pool) vkDestroyDescriptorPool(h.dev, h.probe_pool, nullptr);
+    for (auto layout : h.probe_sets) if (layout) vkDestroyDescriptorSetLayout(h.dev, layout, nullptr);
     if (h.p) NVSDK_NGX_VULKAN_DestroyParameters(h.p);
     if (h.caps) NVSDK_NGX_VULKAN_Shutdown1(h.dev);
     if (h.pipe) vkDestroyPipeline(h.dev, h.pipe, nullptr);

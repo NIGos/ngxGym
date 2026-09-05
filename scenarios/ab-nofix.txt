@@ -1,0 +1,10 @@
+# diagnostic-only
+# A/B control: the consumer scenario with the driver-route fix switched off.
+# A driver whose loader routes feature 18 into a faulting nvngx_dlssnr.dll fails
+# here; a PASS means that driver, or that snippet, does not need the fix.
+frames 300
+
+# cfg: hash_out=1
+# cfg: ngx_loader=1
+
+# host-may-fail

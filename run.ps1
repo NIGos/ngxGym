@@ -64,6 +64,11 @@ if ($Scenario -and -not (Test-Path (Join-Path $root "scenarios/$Scenario.txt")))
     exit 2
 }
 $run = Join-Path $root ("run/" + ($Scenario ? $Scenario : 'smoke'))
+if (Get-Process -Name ngxGym -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq (Join-Path $run 'ngxGym.exe') }) {
+    Write-Host "FAIL: host is still running in $run; its files were left intact."
+    exit 2
+}
 # Clear the CONTENTS rather than the folder. Removing the directory itself fails
 # whenever anything holds a handle on it -- a shell sitting in it, an explorer
 # window -- so the contents go individually and a leftover is a hard failure below.
@@ -184,6 +189,7 @@ $presetBody | Set-Content -Path (Join-Path $run 'default.ini') -Encoding ASCII
 @"
 [GENERAL]
 PresetPath=.\default.ini
+PreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=0
 $effectLines
 [ADDON]
 AddonPath=.
@@ -208,6 +214,9 @@ Write-Host "run folder: $run"
 # file is copied in so the run folder is self-contained and a scenario edited
 # mid-suite cannot change what a finished run did.
 $scfile = Join-Path $root "scenarios/$Scenario.txt"
+if ((Test-Path $scfile) -and (Select-String -Path $scfile -Pattern '^scenepipeline$' -Quiet)) {
+    Copy-Item -LiteralPath (Join-Path $root 'bin/gym-capture.addon64') -Destination $run
+}
 if (Test-Path $scfile) {
     Copy-Item $scfile $run
     $hostArg = "$Scenario.txt"
@@ -227,6 +236,12 @@ if ($Scenario -and (Test-Path $scfile)) {
     if ($extra.Count -gt 0) {
         Add-Content -Path (Join-Path $run 'dlss5-bridge.cfg') -Value $extra -Encoding ASCII
         Write-Host ("scenario config: " + ($extra -join ', '))
+    }
+    $nr = @(Select-String -Path $scfile -Pattern '^#\s*nr:\s*(\w+=.+)$' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() })
+    if ($nr.Count -gt 0) {
+        Add-Content -Path (Join-Path $run 'ReShade.ini') -Value (@('[RenoDX.DLSS5]') + $nr) -Encoding ASCII
+        Write-Host ("consumer config: " + ($nr -join ', '))
     }
 }
 # The add-on replaces a settings file from another version with its defaults at
@@ -507,4 +522,17 @@ if ($oh) {
     Write-Host ("output hash: " + $hex) -ForegroundColor Cyan
 }
 
+# The known patch stimulus is checked as well as the output, so a blank or
+# misencoded input cannot turn a colour regression into a false PASS.
+if ((Test-Path $scfile) -and (Select-String $scfile -Pattern '^colourchart$' -Quiet) -and
+    -not (Select-String -Path $scfile -Pattern '^scenepipeline$' -Quiet)) {
+    $checkArgs = @((Join-Path $root 'check-colour.py'), $log)
+    if ($consumerStaged) { $checkArgs += '--consumer' }
+    & python @checkArgs
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+if ((Test-Path $scfile) -and (Select-String -Path $scfile -Pattern '^scenepipeline$' -Quiet)) {
+    if (-not (Test-Path (Join-Path $run 'gym-display.bin'))) { Write-Host 'FAIL: missing final HDR capture'; exit 1 }
+    Write-Host 'Final HDR frame captured after effects.'
+}
 exit 0

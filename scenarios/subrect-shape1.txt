@@ -1,0 +1,19 @@
+# d3d11-only
+# Phantasy Star Online 2 (#8): the game creates its feature at full size, DLAA,
+# and later evaluates a smaller centred region inside the same textures. Its own
+# D3D11 feature accepts that block -- so does this host's -- and the bridge's
+# mirrored D3D12 feature, built at the create size, answers 0xBAD00005 until it
+# disables itself. With shape=1 the mirrored feature follows the region the game
+# declares, 1280x720 inside 1920x1080 textures based at 320,180, and keeps
+# delivering after the switch. Run it without the cfg line to see the refusal.
+preset 5
+frames 120
+subrect 1280 720
+subrectat 320 180
+frames 600
+
+# cfg: hash_out=0
+# cfg: shape=1
+
+# expect-d3d11: shape=1: the feature follows the game's render region, 1280x720
+# expect-d3d11: feature ready: render 1280x720 -> output 1920x1080
